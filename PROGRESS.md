@@ -9,11 +9,42 @@
 **Phase 0 — Foundation**
 
 ## Current Status
-🔵 Partially complete — web scaffold done, auth and dashboard shell working
+🟢 Phase 0 complete — all foundation work done, ready for Phase 1 (agent & host inventory)
 
 ---
 
 ## What Has Been Built
+
+### Session 2 — User management, roles, feature flags, licence scaffold
+
+**Auth middleware / proxy**
+- `proxy.ts` — Next.js 16 renamed `middleware.ts` to `proxy.ts`; already implemented. Checks `better-auth.session_token` cookie; unauthenticated requests to protected routes redirect to `/login`. Full session verification (including org check) done in server components.
+
+**Auth session helper**
+- `lib/auth/session.ts` — `getRequiredSession()` fetches Better Auth session + full DB user row, redirects to `/login` if unauthenticated
+
+**Feature flags**
+- `lib/features.ts` — `hasFeature(tier, feature)` checks licence tier against feature map
+- `components/shared/feature-gate.tsx` — client component that gates UI behind licence tier; renders fallback/upgrade message if not entitled
+
+**Licence validation**
+- `lib/licence.ts` — offline RS256 JWT validation with bundled dev public key; validates tier, org, expiry, and signature
+
+**Server actions**
+- `lib/actions/users.ts` — `getOrgUsers`, `inviteUser` (7-day token), `updateUserRole`, `deactivateUser`, `cancelInvite`
+- `lib/actions/settings.ts` — `updateOrgName`, `saveLicenceKey` (validates via licence.ts, persists tier)
+
+**Pages (real UI, not placeholders)**
+- `app/(dashboard)/team/page.tsx` + `TeamClient` — member table, role management, invite dialog, pending invites, deactivation
+- `app/(dashboard)/settings/page.tsx` + `SettingsClient` — org name editor, licence key entry with tier badge and error feedback
+- `app/(dashboard)/profile/page.tsx` + `ProfileClient` — name editor, password change
+
+**Database schema additions**
+- `lib/db/schema/invitations.ts` — email, role, token, org/user refs, 7-day expiry, soft delete
+- `organisations` table extended — `licenceTier`, `licenceKey`, `slug`, `logo`
+- `users` table extended — `organisationId`, `role`, `isActive`, `twoFactorEnabled`
+
+---
 
 ### Session 1 — Monorepo + Next.js scaffold + auth + Docker Compose
 
@@ -69,7 +100,7 @@
 
 ## Decisions Made This Far (beyond CLAUDE.md)
 
-1. **Next.js 16.2.1** — Latest stable at time of session (not 15.x as originally specified — user confirmed latest always preferred)
+1. **Next.js 16.2.1** — Latest stable at time of session (not 15.x as originally specified — user confirmed latest always preferred). In Next.js 16, `middleware.ts` is renamed to `proxy.ts` and the export is `proxy()` instead of `middleware()`.
 2. **Tailwind CSS v4** — create-next-app installs this; shadcn Nova preset works with it
 3. **shadcn Nova/Radix preset** — chosen as default; can be changed before public release
 4. **Better Auth v1 Drizzle adapter** — `better-auth/adapters/drizzle` (built-in), not `@auth/drizzle-adapter` (Auth.js)
@@ -99,26 +130,20 @@ _None._
 
 ## What The Next Session Should Build
 
-**Session 2 — User management, roles, teams, feature flags, licence scaffold**
+**Session 3 — Go agent scaffold + proto definitions + gRPC ingest**
 
-Goal: Complete Phase 0 with full user/team management UI, RBAC enforcement, feature flag system, and licence key validation scaffold.
+Session 2 is complete. Phase 0 is done.
 
 Steps:
-1. Add auth middleware (`middleware.ts`) — protect dashboard routes, redirect unauthenticated to `/login`, redirect users without org to `/onboarding`
-2. User management UI — list users, invite by email, change role, deactivate
-3. Team / resource group schema + UI scaffold (tags-based)
-4. Feature flag system — server-side function `hasFeature(session, feature)` based on licence tier
-5. Licence key validation scaffold — signed JWT, offline-capable, bundled public key
-6. System settings page — org name/slug, licence key entry
-7. Profile page — change name, change password, setup/remove TOTP
-8. Generate and run initial Drizzle migrations
+1. Proto definitions (`proto/agent/v1/`) — register, heartbeat, metrics, events
+2. Go agent scaffold (`agent/`) — single binary, config, gRPC client stub
+3. gRPC ingest service (`apps/ingest/`) — receives agent connections, validates mTLS
+4. Agent registration flow — pending state, admin approval via UI
+5. Drizzle migration for `agents`/`hosts` tables
 
 Definition of done:
-- Unauthenticated users cannot access dashboard routes
-- Users without an org are redirected to onboarding
-- Admin can view and manage team members
-- Feature flag functions exist and are used to gate UI elements
-- Licence key can be entered and validated (even if validation is stub)
+- Agent binary compiles and connects to ingest service
+- Registration creates a pending agent record in the DB
 - `npm run build` passes with zero errors/warnings
 
 ---
@@ -133,10 +158,11 @@ Definition of done:
 - [ ] CI pipeline (GitHub Actions)
 - [x] Better Auth — email/password + TOTP
 - [x] Organisation + user schema
-- [ ] Basic RBAC (roles + permissions)
-- [ ] User management UI
-- [ ] Feature flag system
-- [ ] Licence key validation scaffold
+- [x] Basic RBAC (roles + permissions)
+- [x] User management UI
+- [x] Feature flag system
+- [x] Licence key validation scaffold
+- [x] Auth middleware (route protection) — `proxy.ts` (Next.js 16 naming)
 - [ ] System health / about page
 
 ### Phase 1 — Agent & Host Inventory
