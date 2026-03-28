@@ -1,0 +1,63 @@
+##
+# Infrawatch — Local Development Infrastructure
+#
+# Starts only the backing services. Run the app separately with:
+#   cd apps/web && pnpm dev
+#
+# Usage:
+#   docker compose -f docker-compose.dev.yml up -d
+#   docker compose -f docker-compose.dev.yml down
+#
+# Reads credentials from .env in this directory.
+##
+
+services:
+  db:
+    image: timescale/timescaledb:latest-pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -----------------------------------------------------------------
+  # Redpanda — message queue (enabled from Phase 1 / Session 3 onwards)
+  # Uncomment when the ingest service is introduced.
+  # -----------------------------------------------------------------
+  # redpanda:
+  #   image: redpandadata/redpanda:latest
+  #   restart: unless-stopped
+  #   command:
+  #     - redpanda
+  #     - start
+  #     - --overprovisioned
+  #     - --smp 1
+  #     - --memory 512M
+  #     - --reserve-memory 0M
+  #     - --node-id 0
+  #     - --check=false
+  #     - --kafka-addr PLAINTEXT://0.0.0.0:9092
+  #     - --advertise-kafka-addr PLAINTEXT://localhost:9092
+  #   ports:
+  #     - "9092:9092"
+  #     - "9644:9644"  # Admin API
+  #   volumes:
+  #     - redpanda_data:/var/lib/redpanda/data
+  #   healthcheck:
+  #     test: ["CMD", "rpk", "cluster", "info"]
+  #     interval: 15s
+  #     timeout: 10s
+  #     retries: 5
+
+volumes:
+  db_data:
+  # redpanda_data:

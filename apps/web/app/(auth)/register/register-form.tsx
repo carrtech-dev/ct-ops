@@ -1,0 +1,133 @@
+'use client'
+
+import { useState } from 'react'
+import { useForm } from 'react-hook-form'
+import { zodResolver } from '@hookform/resolvers/zod'
+import { z } from 'zod'
+import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { signUp } from '@/lib/auth/client'
+
+const registerSchema = z.object({
+  name: z.string().min(2, 'Name must be at least 2 characters'),
+  email: z.string().email('Enter a valid email address'),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+  confirmPassword: z.string(),
+}).refine(data => data.password === data.confirmPassword, {
+  message: 'Passwords do not match',
+  path: ['confirmPassword'],
+})
+
+type RegisterValues = z.infer<typeof registerSchema>
+
+export function RegisterForm() {
+  const router = useRouter()
+  const [serverError, setServerError] = useState<string | null>(null)
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+  } = useForm<RegisterValues>({
+    resolver: zodResolver(registerSchema),
+  })
+
+  async function onSubmit(values: RegisterValues) {
+    setServerError(null)
+    const result = await signUp.email({
+      name: values.name,
+      email: values.email,
+      password: values.password,
+      callbackURL: '/onboarding',
+    })
+
+    if (result.error) {
+      setServerError(result.error.message ?? 'Registration failed. Please try again.')
+      return
+    }
+
+    router.push('/onboarding')
+    router.refresh()
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Create an account</CardTitle>
+        <CardDescription>Get started with Infrawatch</CardDescription>
+      </CardHeader>
+      <form onSubmit={handleSubmit(onSubmit)}>
+        <CardContent className="space-y-4">
+          {serverError && (
+            <p className="text-sm text-destructive">{serverError}</p>
+          )}
+          <div className="space-y-1.5">
+            <Label htmlFor="name">Full name</Label>
+            <Input
+              id="name"
+              type="text"
+              autoComplete="name"
+              placeholder="Jane Smith"
+              {...register('name')}
+            />
+            {errors.name && (
+              <p className="text-xs text-destructive">{errors.name.message}</p>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="email">Email</Label>
+            <Input
+              id="email"
+              type="email"
+              autoComplete="email"
+              placeholder="you@example.com"
+              {...register('email')}
+            />
+            {errors.email && (
+              <p className="text-xs text-destructive">{errors.email.message}</p>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="password">Password</Label>
+            <Input
+              id="password"
+              type="password"
+              autoComplete="new-password"
+              {...register('password')}
+            />
+            {errors.password && (
+              <p className="text-xs text-destructive">{errors.password.message}</p>
+            )}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="confirmPassword">Confirm password</Label>
+            <Input
+              id="confirmPassword"
+              type="password"
+              autoComplete="new-password"
+              {...register('confirmPassword')}
+            />
+            {errors.confirmPassword && (
+              <p className="text-xs text-destructive">{errors.confirmPassword.message}</p>
+            )}
+          </div>
+        </CardContent>
+        <CardFooter className="flex flex-col gap-3">
+          <Button type="submit" className="w-full" disabled={isSubmitting}>
+            {isSubmitting ? 'Creating account…' : 'Create account'}
+          </Button>
+          <p className="text-sm text-muted-foreground text-center">
+            Already have an account?{' '}
+            <Link href="/login" className="text-foreground font-medium underline underline-offset-4">
+              Sign in
+            </Link>
+          </p>
+        </CardFooter>
+      </form>
+    </Card>
+  )
+}

@@ -1,0 +1,36 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build outputs
+.next
+.turbo
+dist
+out
+
+# Environment — never commit secrets
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode
+.idea
+*.swp
+*.swo
+
+# Docker
+*.tar.gz
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Generated
+packages/proto-ts/src/generated/
