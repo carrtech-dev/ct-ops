@@ -15,14 +15,14 @@ RUN pnpm install --frozen-lockfile
 # --- Builder stage ---
 FROM base AS builder
 WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-# Workspace config required so pnpm resolves node_modules from the workspace root
+# Copy workspace config so pnpm understands the monorepo structure
 COPY package.json pnpm-workspace.yaml ./
+# Copy source first, then node_modules so they are never overwritten
 COPY apps/web/ ./apps/web/
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 
 ENV NEXT_TELEMETRY_DISABLED=1
-# Ensure workspace root binaries (next, etc.) are on PATH
-ENV PATH="/app/node_modules/.bin:$PATH"
 
 # Build the app (DATABASE_URL not needed at build time — only for drizzle-kit)
 ARG DATABASE_URL=postgresql://placeholder:placeholder@placeholder:5432/placeholder
@@ -31,7 +31,7 @@ ARG BETTER_AUTH_URL=http://localhost:3000
 ARG NEXT_PUBLIC_APP_URL=http://localhost:3000
 
 WORKDIR /app/apps/web
-RUN next build
+RUN pnpm run build
 
 # --- Runner stage ---
 FROM base AS runner
