@@ -11,6 +11,19 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 # Copy only the web package.json to leverage Docker layer caching
 COPY apps/web/package.json ./apps/web/
 RUN pnpm install --frozen-lockfile
+# Resolve pnpm virtual-store symlinks for drizzle-orm and postgres so they can be
+# copied as real files into the runner stage (migrate.js needs the full package.json
+# exports map, which the Next.js standalone trace does not include).
+RUN node -e "\
+const {execFileSync}=require('child_process');\
+const path=require('path');\
+const opts={paths:['/app/apps/web']};\
+const dm=path.dirname(require.resolve('drizzle-orm/package.json',opts));\
+const pg=path.dirname(require.resolve('postgres/package.json',opts));\
+execFileSync('mkdir',['-p','/migrate-deps']);\
+execFileSync('cp',['-rL',dm,'/migrate-deps/drizzle-orm']);\
+execFileSync('cp',['-rL',pg,'/migrate-deps/postgres']);\
+"
 
 # --- Builder stage ---
 FROM base AS builder
@@ -60,8 +73,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/web/lib/db/migrations ./apps
 
 # Next.js standalone only traces the specific files it needs for server.js, not the full
 # package structure required for CJS require() in migrate.js. Copy full packages explicitly.
-COPY --from=deps --chown=nextjs:nodejs /app/node_modules/drizzle-orm ./node_modules/drizzle-orm
-COPY --from=deps --chown=nextjs:nodejs /app/node_modules/postgres ./node_modules/postgres
+# /migrate-deps was created in the deps stage with symlinks resolved (cp -rL).
+COPY --from=deps --chown=nextjs:nodejs /migrate-deps/drizzle-orm ./node_modules/drizzle-orm
+COPY --from=deps --chown=nextjs:nodejs /migrate-deps/postgres ./node_modules/postgres
 
 USER nextjs
 
