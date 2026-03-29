@@ -10,20 +10,17 @@ This guide walks you through getting Infrawatch running locally — from a fresh
 
 | Tool | Version | Why |
 |---|---|---|
-| Docker + Docker Compose | v2.x | Runs the full stack |
-| Go | 1.23+ | Building the agent binary |
-| Node.js | 20+ | Running the web app locally (optional if using Docker) |
-| pnpm | 10+ | Package manager for the web app |
-| openssl | any | Generating dev TLS certificates |
+| Docker + Docker Compose | v2.x | Runs the full stack and all build steps |
+
+That's it. No local Go, Node.js, or pnpm required.
 
 ---
 
-## Step 1 — Clone and install dependencies
+## Step 1 — Clone the repository
 
 ```bash
-git clone <repo-url> infrawatch
+git clone https://github.com/simonjcarr/infrawatch infrawatch
 cd infrawatch
-pnpm install
 ```
 
 ---
@@ -123,11 +120,7 @@ An enrolment token is what the agent uses to register itself with your organisat
 make agent
 ```
 
-This produces `dist/agent`. Alternatively, build and run directly:
-
-```bash
-go build -o dist/agent ./agent/cmd/agent
-```
+This uses Docker to compile the Go agent and produces `dist/agent`.
 
 ---
 

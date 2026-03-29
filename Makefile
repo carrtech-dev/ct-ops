@@ -21,27 +21,56 @@ go-build: agent ingest
 
 agent:
 	@echo "Building agent..."
-	mkdir -p dist
-	go build -o dist/agent ./agent/cmd/agent
+	@mkdir -p dist
+	docker run --rm \
+		-v "$(CURDIR):/src" \
+		-w /src \
+		--user "$(shell id -u):$(shell id -g)" \
+		golang:1.23 \
+		go build -o dist/agent ./agent/cmd/agent
+	@echo "Agent binary: dist/agent"
 
 ingest:
 	@echo "Building ingest service..."
-	mkdir -p dist
-	go build -o dist/ingest ./apps/ingest/cmd/ingest
+	@mkdir -p dist
+	docker run --rm \
+		-v "$(CURDIR):/src" \
+		-w /src \
+		--user "$(shell id -u):$(shell id -g)" \
+		golang:1.23 \
+		go build -o dist/ingest ./apps/ingest/cmd/ingest
+	@echo "Ingest binary: dist/ingest"
 
 go-test:
-	go test ./agent/... ./apps/ingest/...
+	docker run --rm \
+		-v "$(CURDIR):/src" \
+		-w /src \
+		golang:1.23 \
+		go test ./agent/... ./apps/ingest/...
 
 # Download all Go dependencies.
 go-deps:
-	go work sync
-	cd proto/gen/go && go mod tidy
-	cd agent && go mod tidy
-	cd apps/ingest && go mod tidy
+	docker run --rm \
+		-v "$(CURDIR):/src" \
+		-w /src \
+		golang:1.23 \
+		sh -c "go work sync && cd proto/gen/go && go mod tidy && cd /src/agent && go mod tidy && cd /src/apps/ingest && go mod tidy"
 
-# Generate dev TLS certificates for local development.
+# Generate dev TLS certificates for local development (requires Docker).
 dev-tls:
-	bash deploy/scripts/gen-dev-tls.sh
+	@mkdir -p deploy/dev-tls
+	docker run --rm \
+		-v "$(CURDIR)/deploy/dev-tls:/out" \
+		alpine/openssl req -x509 \
+		-newkey rsa:4096 \
+		-keyout /out/server.key \
+		-out /out/server.crt \
+		-days 365 \
+		-nodes \
+		-subj "/CN=localhost" \
+		-addext "subjectAltName=DNS:localhost,DNS:ingest,IP:127.0.0.1" \
+		2>/dev/null
+	@echo "Generated deploy/dev-tls/server.crt and deploy/dev-tls/server.key"
 
 clean:
 	rm -rf dist/ deploy/dev-tls/
