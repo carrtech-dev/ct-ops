@@ -21,6 +21,8 @@ COPY package.json pnpm-workspace.yaml ./
 COPY apps/web/ ./apps/web/
 
 ENV NEXT_TELEMETRY_DISABLED=1
+# Ensure workspace root binaries (next, etc.) are on PATH
+ENV PATH="/app/node_modules/.bin:$PATH"
 
 # Build the app (DATABASE_URL not needed at build time — only for drizzle-kit)
 ARG DATABASE_URL=postgresql://placeholder:placeholder@placeholder:5432/placeholder
@@ -29,7 +31,7 @@ ARG BETTER_AUTH_URL=http://localhost:3000
 ARG NEXT_PUBLIC_APP_URL=http://localhost:3000
 
 WORKDIR /app/apps/web
-RUN pnpm run build
+RUN next build
 
 # --- Runner stage ---
 FROM base AS runner
