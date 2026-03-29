@@ -43,13 +43,16 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs && \
     adduser --system --uid 1001 nextjs
 
-COPY --from=builder /app/apps/web/public ./public
+# In a pnpm monorepo, Next.js standalone mirrors the full workspace structure.
+# server.js lands at apps/web/server.js inside the standalone output, so we
+# must copy public/static to match where server.js will look for them.
+COPY --from=builder /app/apps/web/public ./apps/web/public
 
 # Set up prerender cache ownership
-RUN mkdir .next && chown nextjs:nodejs .next
+RUN mkdir -p apps/web/.next && chown nextjs:nodejs apps/web/.next
 
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
 
 USER nextjs
 
@@ -58,4 +61,6 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
+# server.js is at /app/apps/web/server.js after the standalone copy
+WORKDIR /app/apps/web
 CMD ["node", "server.js"]
