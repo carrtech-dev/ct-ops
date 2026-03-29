@@ -141,10 +141,10 @@ All three should show `healthy` or `running`.
 
 ### Step 6 — Run database migrations
 
-Migrations run inside the web container using the bundled drizzle-kit:
+Migrations run inside the web container using the bundled migration script:
 
 ```bash
-docker compose exec web sh -c "cd /app && node_modules/.bin/drizzle-kit migrate"
+docker compose exec web node migrate.js
 ```
 
 ### Step 7 — Continue from [Create your account](#step-create-your-account)

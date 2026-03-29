@@ -54,6 +54,10 @@ RUN mkdir -p apps/web/.next && chown nextjs:nodejs apps/web/.next
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/.next/static
 
+# Migration script and SQL files — uses drizzle-orm (prod dep), no drizzle-kit needed
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/migrate.js ./apps/web/migrate.js
+COPY --from=builder --chown=nextjs:nodejs /app/apps/web/lib/db/migrations ./apps/web/lib/db/migrations
+
 USER nextjs
 
 EXPOSE 3000
