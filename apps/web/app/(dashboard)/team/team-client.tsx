@@ -16,8 +16,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { ChevronDown, UserPlus, Link2, X, UserX, Check } from 'lucide-react'
-import { getOrgUsers, inviteUser, updateUserRole, deactivateUser, cancelInvite } from '@/lib/actions/users'
+import { ChevronDown, UserPlus, Link2, X, UserX, UserCheck, Trash2, Check } from 'lucide-react'
+import { getOrgUsers, inviteUser, updateUserRole, deactivateUser, reactivateUser, removeUser, cancelInvite } from '@/lib/actions/users'
 import type { User, Invitation } from '@/lib/db/schema'
 import { cn } from '@/lib/utils'
 
@@ -106,6 +106,16 @@ export function TeamClient({
 
   const deactivateMutation = useMutation({
     mutationFn: (targetId: string) => deactivateUser(orgId, currentUserId, targetId),
+    onSuccess: invalidate,
+  })
+
+  const reactivateMutation = useMutation({
+    mutationFn: (targetId: string) => reactivateUser(orgId, targetId),
+    onSuccess: invalidate,
+  })
+
+  const removeMutation = useMutation({
+    mutationFn: (targetId: string) => removeUser(orgId, currentUserId, targetId),
     onSuccess: invalidate,
   })
 
@@ -219,17 +229,44 @@ export function TeamClient({
                   </td>
                   {canManage(currentUserRole) && (
                     <td className="px-4 py-3 text-right">
-                      {member.id !== currentUserId && member.isActive && (
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                          onClick={() => deactivateMutation.mutate(member.id)}
-                          disabled={deactivateMutation.isPending}
-                        >
-                          <UserX className="size-4 mr-1" />
-                          Deactivate
-                        </Button>
+                      {member.id !== currentUserId && (
+                        <div className="flex items-center justify-end gap-2">
+                          {member.isActive ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                              onClick={() => deactivateMutation.mutate(member.id)}
+                              disabled={deactivateMutation.isPending}
+                            >
+                              <UserX className="size-4 mr-1" />
+                              Deactivate
+                            </Button>
+                          ) : (
+                            <>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-green-700 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-950"
+                                onClick={() => reactivateMutation.mutate(member.id)}
+                                disabled={reactivateMutation.isPending}
+                              >
+                                <UserCheck className="size-4 mr-1" />
+                                Reactivate
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                                onClick={() => removeMutation.mutate(member.id)}
+                                disabled={removeMutation.isPending}
+                              >
+                                <Trash2 className="size-4 mr-1" />
+                                Remove
+                              </Button>
+                            </>
+                          )}
+                        </div>
                       )}
                     </td>
                   )}

@@ -3,7 +3,7 @@
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { users, invitations } from '@/lib/db/schema'
-import { eq, and, isNull, gt } from 'drizzle-orm'
+import { eq, and, isNull, gt, isNotNull } from 'drizzle-orm'
 import type { User, Invitation } from '@/lib/db/schema'
 
 const inviteSchema = z.object({
@@ -20,7 +20,7 @@ export async function getOrgUsers(
 ): Promise<{ members: User[]; pendingInvites: Invitation[] }> {
   const [members, pendingInvites] = await Promise.all([
     db.query.users.findMany({
-      where: eq(users.organisationId, orgId),
+      where: and(eq(users.organisationId, orgId), isNull(users.deletedAt)),
     }),
     db.query.invitations.findMany({
       where: and(
@@ -155,6 +155,57 @@ export async function deactivateUser(
     return { success: true }
   } catch (err) {
     console.error('Failed to deactivate user:', err)
+    return { error: 'An unexpected error occurred' }
+  }
+}
+
+export async function reactivateUser(
+  orgId: string,
+  targetUserId: string,
+): Promise<{ success: true } | { error: string }> {
+  try {
+    await db
+      .update(users)
+      .set({ isActive: true, updatedAt: new Date() })
+      .where(and(eq(users.id, targetUserId), eq(users.organisationId, orgId)))
+
+    return { success: true }
+  } catch (err) {
+    console.error('Failed to reactivate user:', err)
+    return { error: 'An unexpected error occurred' }
+  }
+}
+
+export async function removeUser(
+  orgId: string,
+  requesterId: string,
+  targetUserId: string,
+): Promise<{ success: true } | { error: string }> {
+  if (requesterId === targetUserId) {
+    return { error: 'You cannot remove your own account' }
+  }
+
+  try {
+    const superAdmins = await db.query.users.findMany({
+      where: and(
+        eq(users.organisationId, orgId),
+        eq(users.role, 'super_admin'),
+        isNull(users.deletedAt),
+      ),
+    })
+    const isTarget = superAdmins.some((u) => u.id === targetUserId)
+    if (isTarget && superAdmins.length === 1) {
+      return { error: 'Cannot remove the last super admin' }
+    }
+
+    await db
+      .update(users)
+      .set({ deletedAt: new Date(), isActive: false, updatedAt: new Date() })
+      .where(and(eq(users.id, targetUserId), eq(users.organisationId, orgId)))
+
+    return { success: true }
+  } catch (err) {
+    console.error('Failed to remove user:', err)
     return { error: 'An unexpected error occurred' }
   }
 }

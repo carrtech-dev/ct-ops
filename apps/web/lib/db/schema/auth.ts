@@ -16,6 +16,7 @@ export const users = pgTable('user', {
   role: text('role').notNull().default('engineer'),
   isActive: boolean('is_active').notNull().default(true),
   twoFactorEnabled: boolean('two_factor_enabled').notNull().default(false),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
 })
 
 export const sessions = pgTable('session', {

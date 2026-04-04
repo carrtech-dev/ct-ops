@@ -85,4 +85,4 @@ ENV HOSTNAME="0.0.0.0"
 
 # server.js is at /app/apps/web/server.js after the standalone copy
 WORKDIR /app/apps/web
-CMD ["node", "server.js"]
+CMD ["sh", "-c", "node migrate.js && node server.js"]
