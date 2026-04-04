@@ -41,7 +41,6 @@ ENV NEXT_TELEMETRY_DISABLED=1
 ARG DATABASE_URL=postgresql://placeholder:placeholder@placeholder:5432/placeholder
 ARG BETTER_AUTH_SECRET=build-time-placeholder
 ARG BETTER_AUTH_URL=http://localhost:3000
-ARG NEXT_PUBLIC_APP_URL=http://localhost:3000
 
 WORKDIR /app/apps/web
 RUN pnpm run build

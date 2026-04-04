@@ -81,7 +81,7 @@ export async function inviteUser(
 
     if (!invite) return { error: 'Failed to create invitation' }
 
-    const baseUrl = process.env['NEXT_PUBLIC_APP_URL'] ?? 'http://localhost:3000'
+    const baseUrl = process.env['BETTER_AUTH_URL'] ?? 'http://localhost:3000'
     return { inviteLink: `${baseUrl}/register?invite=${invite.token}` }
   } catch (err) {
     console.error('Failed to invite user:', err)
