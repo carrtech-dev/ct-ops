@@ -27,7 +27,7 @@ if [ ! -f "$CERT_DIR/server.crt" ] || [ ! -f "$CERT_DIR/server.key" ]; then
   echo "TLS certificates generated (SANs: ${SAN})."
 fi
 
-docker compose -f docker-compose.single.yml build web
+docker compose -f docker-compose.single.yml build web ingest
 docker compose -f docker-compose.single.yml pull
 docker compose -f docker-compose.single.yml down
 docker compose -f docker-compose.single.yml up -d
