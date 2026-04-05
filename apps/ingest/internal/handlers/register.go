@@ -102,7 +102,7 @@ func (h *RegisterHandler) Register(ctx context.Context, req *agentv1.RegisterReq
 	}
 
 	// Insert host row
-	if _, err := queries.InsertHost(ctx, h.pool, orgID, agentID, hostname); err != nil {
+	if _, err := queries.InsertHost(ctx, h.pool, orgID, agentID, hostname, agentOS, agentArch); err != nil {
 		slog.Warn("inserting host row", "err", err)
 	}
 

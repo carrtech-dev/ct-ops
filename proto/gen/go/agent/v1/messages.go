@@ -66,6 +66,8 @@ type HeartbeatRequest struct {
 	TimestampUnix     int64              `json:"timestamp_unix"`
 	AgentVersion      string             `json:"agent_version"`
 	OsVersion         string             `json:"os_version"`
+	Os                string             `json:"os"`
+	Arch              string             `json:"arch"`
 	Disks             []DiskInfo         `json:"disks"`
 	NetworkInterfaces []NetworkInterface `json:"network_interfaces"`
 }

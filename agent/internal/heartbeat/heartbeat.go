@@ -8,6 +8,7 @@ import (
 	"math"
 	"net"
 	"os"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -110,6 +111,8 @@ func (r *Runner) sendHeartbeat(stream agentv1.IngestService_HeartbeatClient) err
 		TimestampUnix:     time.Now().Unix(),
 		AgentVersion:      r.version,
 		OsVersion:         osVersion,
+		Os:                runtime.GOOS,
+		Arch:              runtime.GOARCH,
 		Disks:             disks,
 		NetworkInterfaces: nets,
 	}

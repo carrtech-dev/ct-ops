@@ -12,15 +12,15 @@ import (
 
 // InsertHost inserts a new host row linked to an agent and returns the host ID.
 // Caller should verify no host exists for this agentID before calling.
-func InsertHost(ctx context.Context, pool *pgxpool.Pool, orgID, agentID, hostname string) (string, error) {
+func InsertHost(ctx context.Context, pool *pgxpool.Pool, orgID, agentID, hostname, agentOS, agentArch string) (string, error) {
 	const q = `
-		INSERT INTO hosts (id, organisation_id, agent_id, hostname, status)
-		VALUES ($1, $2, $3, $4, 'unknown')
+		INSERT INTO hosts (id, organisation_id, agent_id, hostname, os, arch, status)
+		VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), 'unknown')
 		RETURNING id
 	`
 	id := newCUID()
 	var returnedID string
-	err := pool.QueryRow(ctx, q, id, orgID, agentID, hostname).Scan(&returnedID)
+	err := pool.QueryRow(ctx, q, id, orgID, agentID, hostname, agentOS, agentArch).Scan(&returnedID)
 	return returnedID, err
 }
 
@@ -33,7 +33,7 @@ func GetHostByAgentID(ctx context.Context, pool *pgxpool.Pool, agentID string) (
 }
 
 // UpdateHostVitals overwrites the latest vitals on the host row for a given agent.
-func UpdateHostVitals(ctx context.Context, pool *pgxpool.Pool, agentID string, cpu, mem, disk float32, uptime int64, ipAddresses []string, osVersion, disksJSON, netJSON string) error {
+func UpdateHostVitals(ctx context.Context, pool *pgxpool.Pool, agentID string, cpu, mem, disk float32, uptime int64, ipAddresses []string, osVersion, agentOS, agentArch, disksJSON, netJSON string) error {
 	const q = `
 		UPDATE hosts
 		SET cpu_percent    = $2,
@@ -42,9 +42,11 @@ func UpdateHostVitals(ctx context.Context, pool *pgxpool.Pool, agentID string, c
 		    uptime_seconds = $5,
 		    ip_addresses   = $6::jsonb,
 		    os_version     = COALESCE(NULLIF($7, ''), os_version),
+		    os             = COALESCE(NULLIF($8, ''), os),
+		    arch           = COALESCE(NULLIF($9, ''), arch),
 		    metadata       = jsonb_build_object(
-		                       'disks',              $8::jsonb,
-		                       'network_interfaces', $9::jsonb
+		                       'disks',              $10::jsonb,
+		                       'network_interfaces', $11::jsonb
 		                     ),
 		    status         = 'online',
 		    last_seen_at   = NOW(),
@@ -52,7 +54,7 @@ func UpdateHostVitals(ctx context.Context, pool *pgxpool.Pool, agentID string, c
 		WHERE agent_id = $1 AND deleted_at IS NULL
 	`
 	ipJSON := buildIPJSON(ipAddresses)
-	_, err := pool.Exec(ctx, q, agentID, cpu, mem, disk, uptime, ipJSON, osVersion, disksJSON, netJSON)
+	_, err := pool.Exec(ctx, q, agentID, cpu, mem, disk, uptime, ipJSON, osVersion, agentOS, agentArch, disksJSON, netJSON)
 	return err
 }
 

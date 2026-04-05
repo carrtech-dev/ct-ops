@@ -161,7 +161,7 @@ func (h *HeartbeatHandler) processHeartbeat(
 	if err := queries.UpdateHostVitals(ctx, h.pool, agentID,
 		req.CpuPercent, req.MemoryPercent, req.DiskPercent,
 		req.UptimeSeconds, ipAddresses,
-		req.OsVersion, disksJSON, netJSON,
+		req.OsVersion, req.Os, req.Arch, disksJSON, netJSON,
 	); err != nil {
 		slog.Warn("updating host vitals", "err", err)
 	}
