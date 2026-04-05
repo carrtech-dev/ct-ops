@@ -1,0 +1,121 @@
+import fs from 'fs'
+import path from 'path'
+
+const GITHUB_REPO_OWNER = process.env.GITHUB_REPO_OWNER ?? ''
+const GITHUB_REPO_NAME = process.env.GITHUB_REPO_NAME ?? ''
+const AGENT_DIST_DIR = process.env.AGENT_DIST_DIR ?? './data/agent-dist'
+
+const PLATFORMS = [
+  { os: 'linux', arch: 'amd64' },
+  { os: 'linux', arch: 'arm64' },
+  { os: 'darwin', arch: 'amd64' },
+  { os: 'darwin', arch: 'arm64' },
+  { os: 'windows', arch: 'amd64' },
+  { os: 'windows', arch: 'arm64' },
+]
+
+interface GitHubAsset {
+  name: string
+  browser_download_url: string
+}
+
+interface GitHubRelease {
+  tag_name: string
+  assets: GitHubAsset[]
+}
+
+/**
+ * Downloads any missing agent binaries for the latest release on startup.
+ * Skips platforms already cached. Logs progress but never throws — a cache
+ * prewarm failure must never prevent the server from starting.
+ */
+export async function prewarmAgentCache(): Promise<void> {
+  if (!GITHUB_REPO_OWNER || !GITHUB_REPO_NAME) {
+    console.log('[agent-cache] GitHub not configured — skipping prewarm')
+    return
+  }
+
+  let release: GitHubRelease | null = null
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${GITHUB_REPO_OWNER}/${GITHUB_REPO_NAME}/releases?per_page=20`,
+      {
+        headers: {
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+          ...(process.env.GITHUB_TOKEN
+            ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` }
+            : {}),
+        },
+      }
+    )
+    if (!res.ok) {
+      console.warn(`[agent-cache] GitHub API returned ${res.status} — skipping prewarm`)
+      return
+    }
+    const releases: GitHubRelease[] = await res.json()
+    release = releases.find((r) => r.tag_name.startsWith('agent/v')) ?? null
+  } catch (err) {
+    console.warn('[agent-cache] Could not reach GitHub — skipping prewarm', err)
+    return
+  }
+
+  if (!release) {
+    console.log('[agent-cache] No agent release found on GitHub')
+    return
+  }
+
+  const version = release.tag_name.replace('agent/', '')
+  console.log(`[agent-cache] Latest agent version: ${version}`)
+
+  await fs.promises.mkdir(AGENT_DIST_DIR, { recursive: true })
+
+  await Promise.allSettled(
+    PLATFORMS.map(({ os, arch }) => downloadIfMissing(release!, version, os, arch))
+  )
+}
+
+async function downloadIfMissing(
+  release: GitHubRelease,
+  version: string,
+  os: string,
+  arch: string
+): Promise<void> {
+  const suffix = os === 'windows' ? '.exe' : ''
+  const baseName = `infrawatch-agent-${os}-${arch}${suffix}`
+  const versionedName = `infrawatch-agent-${os}-${arch}-${version}${suffix}`
+  const versionedPath = path.join(AGENT_DIST_DIR, versionedName)
+
+  if (fs.existsSync(versionedPath)) {
+    console.log(`[agent-cache] ${versionedName} already cached`)
+    return
+  }
+
+  const asset = release.assets.find((a) => a.name === baseName)
+  if (!asset) {
+    // Platform binary not in this release — skip silently
+    return
+  }
+
+  console.log(`[agent-cache] Downloading ${versionedName}...`)
+  try {
+    const res = await fetch(asset.browser_download_url, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+        ...(process.env.GITHUB_TOKEN
+          ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` }
+          : {}),
+      },
+    })
+    if (!res.ok) {
+      console.warn(`[agent-cache] Failed to download ${baseName}: HTTP ${res.status}`)
+      return
+    }
+    const buffer = Buffer.from(await res.arrayBuffer())
+    await fs.promises.writeFile(versionedPath, buffer, { mode: 0o755 })
+    console.log(`[agent-cache] Cached ${versionedName} (${(buffer.byteLength / 1024 / 1024).toFixed(1)} MB)`)
+  } catch (err) {
+    console.warn(`[agent-cache] Error downloading ${baseName}:`, err)
+  }
+}
