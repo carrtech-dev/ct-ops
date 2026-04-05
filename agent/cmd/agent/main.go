@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	agentgrpc "github.com/infrawatch/agent/internal/grpc"
@@ -21,6 +22,8 @@ var version = "dev"
 
 func main() {
 	configPath := flag.String("config", "/etc/infrawatch/agent.toml", "Path to agent TOML config file")
+	tokenFlag := flag.String("token", "", "Enrolment token (overrides config file and INFRAWATCH_ORG_TOKEN)")
+	addressFlag := flag.String("address", "", "Ingest address host:port (overrides config file and INFRAWATCH_INGEST_ADDRESS)")
 	flag.Parse()
 
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
@@ -31,6 +34,13 @@ func main() {
 	if err != nil {
 		slog.Error("loading config", "err", err)
 		os.Exit(1)
+	}
+
+	if *tokenFlag != "" {
+		cfg.Agent.OrgToken = strings.TrimSpace(*tokenFlag)
+	}
+	if *addressFlag != "" {
+		cfg.Ingest.Address = strings.TrimSpace(*addressFlag)
 	}
 
 	if cfg.Agent.OrgToken == "" {

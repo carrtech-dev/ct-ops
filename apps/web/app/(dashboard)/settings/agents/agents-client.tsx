@@ -91,6 +91,7 @@ export function AgentsSettingsClient({
   const queryClient = useQueryClient()
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [newTokenValue, setNewTokenValue] = useState<string | null>(null)
+  const [newInstallCommand, setNewInstallCommand] = useState<string | null>(null)
 
   const { data: tokens } = useQuery({
     queryKey: ['enrolment-tokens', orgId],
@@ -125,6 +126,9 @@ export function AgentsSettingsClient({
       if ('error' in result) return
       queryClient.invalidateQueries({ queryKey: ['enrolment-tokens', orgId] })
       setNewTokenValue(result.token)
+      setNewInstallCommand(
+        `curl -fsSL "${window.location.origin}/api/agent/install?token=${result.token}" | sudo bash`,
+      )
       reset()
     },
   })
@@ -155,8 +159,8 @@ export function AgentsSettingsClient({
               Enrolment Tokens
             </CardTitle>
             <CardDescription className="mt-1">
-              Provide a token to agents in their config file to register them with this
-              organisation.
+              Create an enrolment token to get a one-command install script for registering new
+              agents.
             </CardDescription>
           </div>
           <Button size="sm" onClick={() => setShowCreateDialog(true)}>
@@ -249,31 +253,55 @@ export function AgentsSettingsClient({
         open={showCreateDialog}
         onOpenChange={(open) => {
           setShowCreateDialog(open)
-          if (!open) setNewTokenValue(null)
+          if (!open) {
+            setNewTokenValue(null)
+            setNewInstallCommand(null)
+          }
         }}
       >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Create Enrolment Token</DialogTitle>
             <DialogDescription>
-              Agents use this token in their config file to register with your organisation.
+              Agents use this token to register with your organisation. You&apos;ll get a
+              ready-to-run install command.
             </DialogDescription>
           </DialogHeader>
 
-          {newTokenValue ? (
+          {newTokenValue && newInstallCommand ? (
             <div className="space-y-4">
               <p className="text-sm text-muted-foreground">
-                Token created. Copy it now — it will not be shown again in full.
+                Token created. Run this command on each server you want to enrol:
               </p>
-              <div className="flex items-center gap-2 p-3 bg-muted rounded-md">
-                <code className="text-sm font-mono flex-1 break-all">{newTokenValue}</code>
-                <CopyButton text={newTokenValue} />
+
+              <div className="flex items-start gap-2 p-3 bg-muted rounded-md">
+                <code className="text-xs font-mono flex-1 break-all leading-relaxed">
+                  {newInstallCommand}
+                </code>
+                <CopyButton text={newInstallCommand} />
               </div>
+
+              <details className="text-sm">
+                <summary className="cursor-pointer select-none text-muted-foreground hover:text-foreground">
+                  Show raw token (for manual config)
+                </summary>
+                <div className="mt-2 space-y-1">
+                  <div className="flex items-center gap-2 p-3 bg-muted rounded-md">
+                    <code className="text-xs font-mono flex-1 break-all">{newTokenValue}</code>
+                    <CopyButton text={newTokenValue} />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    This token will not be shown again in full.
+                  </p>
+                </div>
+              </details>
+
               <DialogFooter>
                 <Button
                   onClick={() => {
                     setShowCreateDialog(false)
                     setNewTokenValue(null)
+                    setNewInstallCommand(null)
                   }}
                 >
                   Done
