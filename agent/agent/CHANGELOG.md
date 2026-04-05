@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/simonjcarr/infrawatch/compare/agent/v0.3.0...agent/v0.4.0) (2026-04-05)
+
+
+### Features
+
+* **agent:** multi-platform service install and version-aware binary cache ([b875381](https://github.com/simonjcarr/infrawatch/commit/b8753813bbbea8be42e332997f9ff2ac1f160996))
+* **agent:** server-hosted binaries and agent self-install ([87ba22c](https://github.com/simonjcarr/infrawatch/commit/87ba22c5c1afaed82ea5f240bc926a52f1d29ea1))
+
 ## [0.3.0](https://github.com/simonjcarr/infrawatch/compare/agent/v0.2.0...agent/v0.3.0) (2026-04-05)
 
 
