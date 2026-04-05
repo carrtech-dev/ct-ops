@@ -11,6 +11,10 @@ address = "infrawatch.yourdomain.com:9443"
 # For dev/self-signed: set to the path of deploy/dev-tls/server.crt
 ca_cert_file = ""
 
+# Disable TLS certificate verification entirely. INSECURE — for development only.
+# Do not use in production.
+tls_skip_verify = false
+
 [agent]
 # Enrolment token from the Infrawatch UI (Settings → Agent Enrolment)
 # Can also be set via INFRAWATCH_ORG_TOKEN environment variable.

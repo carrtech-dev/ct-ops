@@ -38,11 +38,7 @@ func main() {
 			slog.Error("--token is required when using --install")
 			os.Exit(1)
 		}
-		ingestAddr := "localhost:9443"
-		if *addressFlag != "" {
-			ingestAddr = strings.TrimSpace(*addressFlag)
-		}
-		if err := install.Run(*tokenFlag, ingestAddr); err != nil {
+		if err := install.Run(*tokenFlag, strings.TrimSpace(*addressFlag)); err != nil {
 			slog.Error("install failed", "err", err)
 			os.Exit(1)
 		}
@@ -93,7 +89,7 @@ func runAgent(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 
-	conn, err := agentgrpc.Connect(cfg.Ingest.Address, cfg.Ingest.CACertFile)
+	conn, err := agentgrpc.Connect(cfg.Ingest.Address, cfg.Ingest.CACertFile, cfg.Ingest.TLSSkipVerify)
 	if err != nil {
 		slog.Error("connecting to ingest service", "err", err, "address", cfg.Ingest.Address)
 		return err

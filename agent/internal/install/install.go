@@ -9,10 +9,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"time"
+
+	agentconfig "github.com/infrawatch/agent/internal/config"
 )
 
 // Run performs a full system installation for the current OS.
 // It must be called as root (Linux/macOS) or Administrator (Windows).
+// orgToken is required. ingestAddress is optional — pass empty string to keep the existing value.
 func Run(orgToken, ingestAddress string) error {
 	switch runtime.GOOS {
 	case "linux":
@@ -26,6 +31,54 @@ func Run(orgToken, ingestAddress string) error {
 	}
 }
 
+// mergeConfig loads the existing config at cfgPath (if present), then overlays
+// any explicitly provided flag values on top. This preserves fields like
+// ca_cert_file and tls_skip_verify across reinstalls.
+// orgToken is always applied. ingestAddress is only applied if non-empty.
+func mergeConfig(cfgPath, orgToken, ingestAddress, defaultDataDir string) *agentconfig.Config {
+	cfg, err := agentconfig.Load(cfgPath)
+	if err != nil {
+		// File missing or unparseable — start from scratch with caller-supplied defaults.
+		cfg = &agentconfig.Config{
+			Ingest: agentconfig.IngestConfig{
+				Address: "localhost:9443",
+			},
+			Agent: agentconfig.AgentConfig{
+				DataDir:               defaultDataDir,
+				HeartbeatIntervalSecs: 30,
+			},
+		}
+	} else {
+		slog.Info("existing config found, preserving settings", "path", cfgPath)
+		backupConfig(cfgPath)
+	}
+
+	cfg.Agent.OrgToken = orgToken
+	if ingestAddress != "" {
+		cfg.Ingest.Address = ingestAddress
+	}
+
+	return cfg
+}
+
+// backupConfig copies cfgPath to cfgPath.<timestamp>.bak so the user can recover it.
+func backupConfig(cfgPath string) {
+	bak := fmt.Sprintf("%s.%s.bak", cfgPath, time.Now().UTC().Format("20060102T150405Z"))
+	src, err := os.Open(cfgPath)
+	if err != nil {
+		return
+	}
+	defer src.Close()
+	dst, err := os.OpenFile(bak, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+	if err != nil {
+		return
+	}
+	defer dst.Close()
+	if _, err := io.Copy(dst, src); err == nil {
+		slog.Info("existing config backed up", "backup", bak)
+	}
+}
+
 // ── Linux / systemd ───────────────────────────────────────────────────────────
 
 func installLinux(orgToken, ingestAddress string) error {
@@ -34,6 +87,7 @@ func installLinux(orgToken, ingestAddress string) error {
 	}
 
 	const dest = "/usr/local/bin/infrawatch-agent"
+	const cfgPath = "/etc/infrawatch/agent.toml"
 	const dataDir = "/var/lib/infrawatch/agent"
 
 	if err := copyBinary(dest); err != nil {
@@ -42,7 +96,8 @@ func installLinux(orgToken, ingestAddress string) error {
 	if err := mkdirs("/etc/infrawatch", dataDir); err != nil {
 		return fmt.Errorf("creating directories: %w", err)
 	}
-	if err := writeConfig("/etc/infrawatch/agent.toml", orgToken, ingestAddress, dataDir); err != nil {
+	cfg := mergeConfig(cfgPath, orgToken, ingestAddress, dataDir)
+	if err := writeConfig(cfgPath, cfg); err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}
 
@@ -86,6 +141,7 @@ func installDarwin(orgToken, ingestAddress string) error {
 	}
 
 	const dest = "/usr/local/bin/infrawatch-agent"
+	const cfgPath = "/etc/infrawatch/agent.toml"
 	const dataDir = "/var/lib/infrawatch/agent"
 	const plistPath = "/Library/LaunchDaemons/com.infrawatch.agent.plist"
 
@@ -95,7 +151,8 @@ func installDarwin(orgToken, ingestAddress string) error {
 	if err := mkdirs("/etc/infrawatch", dataDir, "/var/log"); err != nil {
 		return fmt.Errorf("creating directories: %w", err)
 	}
-	if err := writeConfig("/etc/infrawatch/agent.toml", orgToken, ingestAddress, dataDir); err != nil {
+	cfg := mergeConfig(cfgPath, orgToken, ingestAddress, dataDir)
+	if err := writeConfig(cfgPath, cfg); err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}
 
@@ -157,7 +214,8 @@ func installWindows(orgToken, ingestAddress string) error {
 	if err := copyBinary(dest); err != nil {
 		return fmt.Errorf("copying binary: %w", err)
 	}
-	if err := writeConfig(cfgFile, orgToken, ingestAddress, dataDir); err != nil {
+	cfg := mergeConfig(cfgFile, orgToken, ingestAddress, dataDir)
+	if err := writeConfig(cfgFile, cfg); err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}
 
@@ -236,16 +294,26 @@ func mkdirs(dirs ...string) error {
 	return nil
 }
 
-func writeConfig(path, orgToken, ingestAddress, dataDir string) error {
-	content := fmt.Sprintf(`[ingest]
-address = %q
+func writeConfig(path string, cfg *agentconfig.Config) error {
+	var b strings.Builder
 
-[agent]
-org_token = %q
-data_dir   = %q
-`, ingestAddress, orgToken, dataDir)
+	b.WriteString("[ingest]\n")
+	b.WriteString(fmt.Sprintf("address = %q\n", cfg.Ingest.Address))
+	if cfg.Ingest.CACertFile != "" {
+		b.WriteString(fmt.Sprintf("ca_cert_file = %q\n", cfg.Ingest.CACertFile))
+	}
+	if cfg.Ingest.TLSSkipVerify {
+		b.WriteString("tls_skip_verify = true\n")
+	}
 
-	if err := writeFile(path, content, 0o600); err != nil {
+	b.WriteString("\n[agent]\n")
+	b.WriteString(fmt.Sprintf("org_token = %q\n", cfg.Agent.OrgToken))
+	b.WriteString(fmt.Sprintf("data_dir   = %q\n", cfg.Agent.DataDir))
+	if cfg.Agent.HeartbeatIntervalSecs > 0 && cfg.Agent.HeartbeatIntervalSecs != 30 {
+		b.WriteString(fmt.Sprintf("heartbeat_interval_secs = %d\n", cfg.Agent.HeartbeatIntervalSecs))
+	}
+
+	if err := writeFile(path, b.String(), 0o600); err != nil {
 		return err
 	}
 	slog.Info("config written", "path", path)

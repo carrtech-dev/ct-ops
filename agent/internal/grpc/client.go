@@ -7,8 +7,8 @@ import (
 )
 
 // Connect establishes a gRPC connection to the ingest service.
-func Connect(address, caCertFile string) (*grpc.ClientConn, error) {
-	creds, err := BuildTLSCredentials(caCertFile)
+func Connect(address, caCertFile string, skipVerify bool) (*grpc.ClientConn, error) {
+	creds, err := BuildTLSCredentials(caCertFile, skipVerify)
 	if err != nil {
 		return nil, fmt.Errorf("building TLS credentials: %w", err)
 	}

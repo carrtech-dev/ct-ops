@@ -16,10 +16,12 @@ type Config struct {
 
 type IngestConfig struct {
 	// Address is host:port of the ingest gRPC service.
-	Address    string `toml:"address"`
+	Address string `toml:"address"`
 	// CACertFile is the path to the server's CA certificate for TLS verification.
 	// If empty, system root CAs are used.
 	CACertFile string `toml:"ca_cert_file"`
+	// TLSSkipVerify disables TLS certificate verification. Insecure — for development only.
+	TLSSkipVerify bool `toml:"tls_skip_verify"`
 }
 
 type AgentConfig struct {

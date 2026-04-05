@@ -24,6 +24,17 @@ fi
 
 echo "Generating self-signed dev TLS certificate..."
 
+# Collect all non-loopback IPv4 addresses to include as SANs so remote agents can connect
+if command -v ip &>/dev/null; then
+  LOCAL_IPS=$(ip -4 addr show scope global 2>/dev/null | awk '/inet / {split($2,a,"/"); print "IP:" a[1]}' | tr '\n' ',' | sed 's/,$//')
+else
+  LOCAL_IPS=$(ifconfig 2>/dev/null | awk '/inet / && !/127\.0\.0\.1/ {print "IP:" $2}' | tr '\n' ',' | sed 's/,$//')
+fi
+SAN="DNS:localhost,DNS:ingest,IP:127.0.0.1"
+if [ -n "${LOCAL_IPS}" ]; then
+  SAN="${SAN},${LOCAL_IPS}"
+fi
+
 openssl req -x509 \
   -newkey rsa:4096 \
   -keyout "${KEY}" \
@@ -31,8 +42,10 @@ openssl req -x509 \
   -days 365 \
   -nodes \
   -subj "/CN=localhost" \
-  -addext "subjectAltName=DNS:localhost,DNS:ingest,IP:127.0.0.1" \
+  -addext "subjectAltName=${SAN}" \
   2>/dev/null
+
+echo "SANs: ${SAN}"
 
 echo "Generated:"
 echo "  Certificate: ${CERT}"
