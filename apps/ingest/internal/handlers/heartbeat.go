@@ -80,8 +80,19 @@ func (h *HeartbeatHandler) Heartbeat(stream agentv1.IngestService_HeartbeatServe
 		}
 		return status.Error(codes.Internal, "internal error")
 	}
-	if agent.Status != "active" {
+	// Allow offline agents to reconnect — offline is a transient state set when
+	// a stream closes. Only pending and revoked agents should be blocked.
+	if agent.Status == "pending" || agent.Status == "revoked" {
 		return status.Errorf(codes.PermissionDenied, "agent is not active (status: %s)", agent.Status)
+	}
+	if agent.Status == "offline" {
+		if err := queries.SetAgentStatus(ctx, h.pool, agentID, "active"); err != nil {
+			slog.Warn("reactivating offline agent", "err", err)
+		}
+		if err := queries.InsertAgentStatusHistory(ctx, h.pool, agentID, agent.OrganisationID, "active", nil, "agent reconnected"); err != nil {
+			slog.Warn("inserting reconnect status history", "err", err)
+		}
+		agent.Status = "active"
 	}
 
 	slog.Info("heartbeat stream started", "agent_id", agentID)
