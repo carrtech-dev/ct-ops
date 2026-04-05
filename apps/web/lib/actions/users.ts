@@ -3,7 +3,7 @@
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { users, invitations } from '@/lib/db/schema'
-import { eq, and, isNull, gt, isNotNull } from 'drizzle-orm'
+import { eq, and, isNull, isNotNull, gt } from 'drizzle-orm'
 import type { User, Invitation } from '@/lib/db/schema'
 
 const inviteSchema = z.object({
@@ -38,15 +38,36 @@ export async function inviteUser(
   orgId: string,
   invitedById: string,
   input: { email: string; role: string },
-): Promise<{ inviteLink: string } | { error: string }> {
+): Promise<{ inviteLink: string } | { restored: true } | { error: string }> {
   const parsed = inviteSchema.safeParse(input)
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? 'Invalid input' }
   }
 
   try {
+    // Check for a previously removed user — restore them rather than re-registering,
+    // since their account (and email) still exist in the database.
+    const removedUser = await db.query.users.findFirst({
+      where: and(
+        eq(users.email, parsed.data.email),
+        eq(users.organisationId, orgId),
+        isNotNull(users.deletedAt),
+      ),
+    })
+    if (removedUser) {
+      await db
+        .update(users)
+        .set({ deletedAt: null, isActive: true, role: parsed.data.role, updatedAt: new Date() })
+        .where(eq(users.id, removedUser.id))
+      return { restored: true }
+    }
+
     const existing = await db.query.users.findFirst({
-      where: and(eq(users.email, parsed.data.email), eq(users.organisationId, orgId)),
+      where: and(
+        eq(users.email, parsed.data.email),
+        eq(users.organisationId, orgId),
+        isNull(users.deletedAt),
+      ),
     })
     if (existing) {
       return { error: 'This user is already a member of your organisation' }

@@ -92,6 +92,11 @@ export function TeamClient({
         setInviteError(result.error)
         return
       }
+      if ('restored' in result) {
+        closeInviteDialog()
+        invalidate()
+        return
+      }
       setInviteLink(result.inviteLink)
       invalidate()
     },
