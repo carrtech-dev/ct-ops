@@ -121,9 +121,12 @@ func (h *HeartbeatHandler) Heartbeat(stream agentv1.IngestService_HeartbeatServe
 		}
 	}
 
-	// Mark agent offline on stream close
+	// Mark agent and host offline on stream close
 	if err := queries.SetAgentStatus(context.Background(), h.pool, agentID, "offline"); err != nil {
 		slog.Warn("setting agent offline", "err", err)
+	}
+	if err := queries.SetHostOffline(context.Background(), h.pool, agentID); err != nil {
+		slog.Warn("setting host offline", "err", err)
 	}
 	if err := queries.InsertAgentStatusHistory(context.Background(), h.pool, agentID, agent.OrganisationID, "offline", nil, "heartbeat stream closed"); err != nil {
 		slog.Warn("inserting offline status history", "err", err)

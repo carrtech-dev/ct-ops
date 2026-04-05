@@ -56,6 +56,18 @@ func UpdateHostVitals(ctx context.Context, pool *pgxpool.Pool, agentID string, c
 	return err
 }
 
+// SetHostOffline marks the host associated with an agent as offline.
+func SetHostOffline(ctx context.Context, pool *pgxpool.Pool, agentID string) error {
+	const q = `
+		UPDATE hosts
+		SET status     = 'offline',
+		    updated_at = NOW()
+		WHERE agent_id = $1 AND deleted_at IS NULL
+	`
+	_, err := pool.Exec(ctx, q, agentID)
+	return err
+}
+
 // MarshalToJSONString marshals v to a JSON string, returning "[]" on error.
 func MarshalToJSONString(v interface{}) string {
 	b, err := json.Marshal(v)
