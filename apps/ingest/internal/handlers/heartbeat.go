@@ -107,22 +107,73 @@ func (h *HeartbeatHandler) Heartbeat(stream agentv1.IngestService_HeartbeatServe
 		return err
 	}
 
-	// Stream loop
-	for {
-		req, err := stream.Recv()
-		if err == io.EOF {
-			break
+	// Background receiver: pushes incoming HeartbeatRequests onto recvCh so
+	// the main loop can also select on the query-poll ticker.
+	recvCh := make(chan *agentv1.HeartbeatRequest, 4)
+	recvErrCh := make(chan error, 1)
+	go func() {
+		for {
+			req, err := stream.Recv()
+			if err != nil {
+				recvErrCh <- err
+				close(recvCh)
+				return
+			}
+			select {
+			case recvCh <- req:
+			case <-ctx.Done():
+				return
+			}
 		}
-		if err != nil {
-			if ctx.Err() != nil {
-				break
+	}()
+
+	// Poll the DB every 2s for pending ad-hoc queries to push proactively.
+	// This is the key to sub-5-second user-facing latency for "Query server".
+	queryPollTicker := time.NewTicker(2 * time.Second)
+	defer queryPollTicker.Stop()
+
+loop:
+	for {
+		select {
+		case <-ctx.Done():
+			break loop
+
+		case err := <-recvErrCh:
+			if err == io.EOF || ctx.Err() != nil {
+				break loop
 			}
 			slog.Warn("heartbeat recv error", "agent_id", agentID, "err", err)
-			break
-		}
+			break loop
 
-		if err := h.processHeartbeat(ctx, stream, agentID, agent.OrganisationID, hostID, req); err != nil {
-			return err
+		case req, ok := <-recvCh:
+			if !ok {
+				break loop
+			}
+			if err := h.processHeartbeat(ctx, stream, agentID, agent.OrganisationID, hostID, req); err != nil {
+				return err
+			}
+
+		case <-queryPollTicker.C:
+			if hostID == "" {
+				continue
+			}
+			pending, err := queries.GetPendingQueriesForHost(ctx, h.pool, hostID)
+			if err != nil {
+				slog.Warn("fetching pending queries", "host_id", hostID, "err", err)
+				continue
+			}
+			if len(pending) == 0 {
+				continue
+			}
+			pqs := make([]agentv1.AgentQuery, 0, len(pending))
+			for _, p := range pending {
+				pqs = append(pqs, agentv1.AgentQuery{QueryID: p.ID, QueryType: p.QueryType})
+			}
+			if err := stream.Send(&agentv1.HeartbeatResponse{Ok: true, PendingQueries: pqs}); err != nil {
+				slog.Warn("pushing pending queries", "host_id", hostID, "err", err)
+				return err
+			}
+			slog.Info("pushed pending queries to agent", "host_id", hostID, "count", len(pqs))
 		}
 	}
 
@@ -189,6 +240,20 @@ func (h *HeartbeatHandler) processHeartbeat(
 			); err != nil {
 				slog.Warn("inserting check result", "check_id", result.CheckID, "err", err)
 			}
+		}
+	}
+
+	// Persist incoming ad-hoc agent query results
+	for _, qr := range req.QueryResults {
+		var resultJSON []byte
+		switch qr.QueryType {
+		case "list_ports":
+			resultJSON, _ = json.Marshal(map[string]any{"ports": qr.Ports})
+		case "list_services":
+			resultJSON, _ = json.Marshal(map[string]any{"services": qr.Services})
+		}
+		if err := queries.CompleteAgentQuery(ctx, h.pool, qr.QueryID, qr.Status, qr.Error, resultJSON); err != nil {
+			slog.Warn("completing agent query", "query_id", qr.QueryID, "err", err)
 		}
 	}
 

@@ -4,7 +4,12 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { checks, checkResults } from '@/lib/db/schema'
 import { eq, and, isNull, desc } from 'drizzle-orm'
-import type { CheckConfig, CheckType, CheckResultRow } from '@/lib/db/schema'
+import type { Check, CheckConfig, CheckType, CheckResultRow } from '@/lib/db/schema'
+
+export type CheckWithHistory = Check & {
+  latestResult: Pick<CheckResultRow, 'status' | 'ranAt' | 'output'> | null
+  results: CheckResultRow[]
+}
 
 const portConfigSchema = z.object({
   host: z.string().min(1),
@@ -35,7 +40,7 @@ const updateCheckSchema = z.object({
   intervalSeconds: z.number().int().min(10).max(3600).optional(),
 })
 
-export async function getChecks(orgId: string, hostId: string) {
+export async function getChecksWithHistory(orgId: string, hostId: string): Promise<CheckWithHistory[]> {
   const rows = await db.query.checks.findMany({
     where: and(
       eq(checks.organisationId, orgId),
@@ -45,18 +50,16 @@ export async function getChecks(orgId: string, hostId: string) {
     orderBy: checks.createdAt,
   })
 
-  const withResults = await Promise.all(
+  return Promise.all(
     rows.map(async (check) => {
-      const latest = await db.query.checkResults.findFirst({
+      const results = await db.query.checkResults.findMany({
         where: eq(checkResults.checkId, check.id),
         orderBy: desc(checkResults.ranAt),
-        columns: { status: true, ranAt: true, output: true },
+        limit: 100,
       })
-      return { ...check, latestResult: latest ?? null }
+      return { ...check, results, latestResult: results[0] ?? null }
     }),
   )
-
-  return withResults
 }
 
 export async function createCheck(
@@ -123,6 +126,24 @@ export async function updateCheck(
   return { success: true }
 }
 
+export async function deleteCheckHistory(
+  orgId: string,
+  checkId: string,
+): Promise<{ success: true } | { error: string }> {
+  const existing = await db.query.checks.findFirst({
+    where: and(
+      eq(checks.id, checkId),
+      eq(checks.organisationId, orgId),
+      isNull(checks.deletedAt),
+    ),
+  })
+  if (!existing) return { error: 'Check not found' }
+
+  await db.delete(checkResults).where(eq(checkResults.checkId, checkId))
+
+  return { success: true }
+}
+
 export async function deleteCheck(
   orgId: string,
   checkId: string,
@@ -144,20 +165,3 @@ export async function deleteCheck(
   return { success: true }
 }
 
-export async function getCheckResults(
-  orgId: string,
-  checkId: string,
-  limit = 20,
-): Promise<CheckResultRow[]> {
-  // Verify the check belongs to this org
-  const check = await db.query.checks.findFirst({
-    where: and(eq(checks.id, checkId), eq(checks.organisationId, orgId)),
-  })
-  if (!check) return []
-
-  return db.query.checkResults.findMany({
-    where: eq(checkResults.checkId, checkId),
-    orderBy: desc(checkResults.ranAt),
-    limit,
-  })
-}

@@ -73,6 +73,39 @@ type CheckResult struct {
 	RanAtUnix  int64  `json:"ran_at_unix"`
 }
 
+// AgentQuery is pushed from the server to instruct the agent to run a one-shot
+// enumeration query (e.g. list listening ports, list running services) and
+// return the results on the next heartbeat.
+type AgentQuery struct {
+	QueryID   string `json:"query_id"`
+	QueryType string `json:"query_type"` // "list_ports" | "list_services"
+}
+
+// PortInfo describes a single listening TCP port discovered on the host.
+type PortInfo struct {
+	Port     int32  `json:"port"`
+	Protocol string `json:"protocol"` // "tcp"
+	Process  string `json:"process,omitempty"`
+}
+
+// ServiceInfo describes a single systemd service unit.
+type ServiceInfo struct {
+	Name      string `json:"name"`
+	LoadState string `json:"load_state"`
+	ActiveSub string `json:"active_sub"`
+}
+
+// AgentQueryResult is returned by the agent in a HeartbeatRequest after
+// executing an AgentQuery pushed to it via a HeartbeatResponse.
+type AgentQueryResult struct {
+	QueryID   string        `json:"query_id"`
+	QueryType string        `json:"query_type"`
+	Status    string        `json:"status"` // "ok" | "error"
+	Error     string        `json:"error,omitempty"`
+	Ports     []PortInfo    `json:"ports,omitempty"`
+	Services  []ServiceInfo `json:"services,omitempty"`
+}
+
 // HeartbeatRequest is sent by the agent on each heartbeat interval.
 type HeartbeatRequest struct {
 	AgentId           string             `json:"agent_id"`
@@ -88,9 +121,12 @@ type HeartbeatRequest struct {
 	Disks             []DiskInfo         `json:"disks"`
 	NetworkInterfaces []NetworkInterface `json:"network_interfaces"`
 	CheckResults      []CheckResult      `json:"check_results"`
+	QueryResults      []AgentQueryResult `json:"query_results,omitempty"`
 }
 
-// HeartbeatResponse is sent back by the server on each heartbeat tick.
+// HeartbeatResponse is sent back by the server on each heartbeat tick, or
+// pushed proactively on the open bidirectional stream when the server has
+// pending queries for the agent.
 type HeartbeatResponse struct {
 	Ok              bool              `json:"ok"`
 	Command         string            `json:"command"`
@@ -99,4 +135,5 @@ type HeartbeatResponse struct {
 	UpdateAvailable bool              `json:"update_available"`
 	DownloadURL     string            `json:"download_url"`
 	Checks          []CheckDefinition `json:"checks"`
+	PendingQueries  []AgentQuery      `json:"pending_queries,omitempty"`
 }

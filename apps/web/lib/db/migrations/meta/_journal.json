@@ -50,6 +50,13 @@
       "when": 1775467783156,
       "tag": "0006_icy_trish_tilby",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1775500633198,
+      "tag": "0007_bitter_firestar",
+      "breakpoints": true
     }
   ]
 }
