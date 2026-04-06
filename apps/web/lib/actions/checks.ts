@@ -4,13 +4,7 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { checks, checkResults } from '@/lib/db/schema'
 import { eq, and, isNull, desc } from 'drizzle-orm'
-import type { Check, CheckResultRow, CheckConfig, CheckType } from '@/lib/db/schema'
-
-export type { Check, CheckResultRow }
-
-export type CheckWithLatestResult = Check & {
-  latestResult: Pick<CheckResultRow, 'status' | 'ranAt' | 'output'> | null
-}
+import type { CheckConfig, CheckType, CheckResultRow } from '@/lib/db/schema'
 
 const portConfigSchema = z.object({
   host: z.string().min(1),
@@ -41,7 +35,7 @@ const updateCheckSchema = z.object({
   intervalSeconds: z.number().int().min(10).max(3600).optional(),
 })
 
-export async function getChecks(orgId: string, hostId: string): Promise<CheckWithLatestResult[]> {
+export async function getChecks(orgId: string, hostId: string) {
   const rows = await db.query.checks.findMany({
     where: and(
       eq(checks.organisationId, orgId),
@@ -51,8 +45,7 @@ export async function getChecks(orgId: string, hostId: string): Promise<CheckWit
     orderBy: checks.createdAt,
   })
 
-  // Fetch latest result for each check
-  const withResults: CheckWithLatestResult[] = await Promise.all(
+  const withResults = await Promise.all(
     rows.map(async (check) => {
       const latest = await db.query.checkResults.findFirst({
         where: eq(checkResults.checkId, check.id),

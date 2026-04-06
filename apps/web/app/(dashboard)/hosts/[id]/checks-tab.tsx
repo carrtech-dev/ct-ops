@@ -40,8 +40,11 @@ import {
   deleteCheck,
   getCheckResults,
 } from '@/lib/actions/checks'
-import type { CheckWithLatestResult, CheckResultRow } from '@/lib/actions/checks'
-import type { CheckType } from '@/lib/db/schema'
+import type { Check, CheckResultRow, CheckType } from '@/lib/db/schema'
+
+type CheckWithLatestResult = Check & {
+  latestResult: Pick<CheckResultRow, 'status' | 'ranAt' | 'output'> | null
+}
 
 interface Props {
   orgId: string
@@ -185,7 +188,7 @@ function AddCheckDialog({
       } else if (checkType === 'process') {
         config = { process_name: processName }
       } else {
-        config = { url: httpUrl, expected_status: parseInt(httpStatus, 10) }
+        config = { url: httpUrl, expected_status: parseInt(httpStatus, 10) || 200 }
       }
       return createCheck(orgId, { hostId, name, checkType, config, intervalSeconds })
     },
@@ -197,6 +200,9 @@ function AddCheckDialog({
       queryClient.invalidateQueries({ queryKey: ['checks', orgId, hostId] })
       onOpenChange(false)
       resetForm()
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : 'Something went wrong')
     },
   })
 
@@ -314,7 +320,7 @@ function AddCheckDialog({
               min={10}
               max={3600}
               value={intervalSeconds}
-              onChange={(e) => setIntervalSeconds(parseInt(e.target.value, 10))}
+              onChange={(e) => setIntervalSeconds(parseInt(e.target.value, 10) || 60)}
             />
           </div>
 
