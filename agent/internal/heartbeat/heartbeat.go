@@ -10,6 +10,7 @@ import (
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -31,17 +32,32 @@ type Runner struct {
 	prevCPUTotal   uint64
 	prevCPUIdle    uint64
 	prevCPUSampled bool
+
+	// Buffered ad-hoc query results, drained on each heartbeat send.
+	queryResultsMu sync.Mutex
+	queryResults   []agentv1.AgentQueryResult
+
+	// Dedupes server-pushed queries: the ingest handler may re-push the same
+	// query on consecutive 2s poll ticks while the agent is still executing it.
+	seenMu       sync.Mutex
+	seenQueryIDs map[string]struct{}
+
+	// Signalled when new query results are ready so the send loop can fire
+	// an immediate heartbeat rather than waiting for the next 30s tick.
+	resultsReady chan struct{}
 }
 
 // New creates a new heartbeat Runner.
 func New(client agentv1.IngestServiceClient, agentID, jwtToken, version string, intervalSecs int, executor *checks.Executor) *Runner {
 	return &Runner{
-		client:   client,
-		agentID:  agentID,
-		jwtToken: jwtToken,
-		version:  version,
-		interval: time.Duration(intervalSecs) * time.Second,
-		executor: executor,
+		client:       client,
+		agentID:      agentID,
+		jwtToken:     jwtToken,
+		version:      version,
+		interval:     time.Duration(intervalSecs) * time.Second,
+		executor:     executor,
+		seenQueryIDs: make(map[string]struct{}),
+		resultsReady: make(chan struct{}, 1),
 	}
 }
 
@@ -80,11 +96,20 @@ func (r *Runner) runStream(ctx context.Context) error {
 
 	slog.Info("heartbeat stream opened", "agent_id", r.agentID)
 
+	// Background receiver: the server pushes HeartbeatResponses both as
+	// replies to our heartbeats and proactively when queries arrive, so we
+	// cannot call stream.Recv() inline in sendHeartbeat. Run it in its own
+	// goroutine and signal the send loop via recvErr on failure.
+	streamCtx, cancelRecv := context.WithCancel(ctx)
+	defer cancelRecv()
+	recvErr := make(chan error, 1)
+	go r.runReceiver(streamCtx, stream, recvErr)
+
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
 
 	// Send first heartbeat immediately
-	if err := r.sendHeartbeat(ctx, stream); err != nil {
+	if err := r.sendHeartbeat(stream); err != nil {
 		return err
 	}
 
@@ -94,15 +119,128 @@ func (r *Runner) runStream(ctx context.Context) error {
 			_ = stream.CloseSend()
 			return ctx.Err()
 
+		case err := <-recvErr:
+			_ = stream.CloseSend()
+			return err
+
 		case <-ticker.C:
-			if err := r.sendHeartbeat(ctx, stream); err != nil {
+			if err := r.sendHeartbeat(stream); err != nil {
+				return err
+			}
+
+		case <-r.resultsReady:
+			// A query result is waiting — fire an immediate heartbeat rather
+			// than making the user wait up to 30s for the next tick.
+			if err := r.sendHeartbeat(stream); err != nil {
 				return err
 			}
 		}
 	}
 }
 
-func (r *Runner) sendHeartbeat(ctx context.Context, stream agentv1.IngestService_HeartbeatClient) error {
+// runReceiver reads HeartbeatResponses from the stream in a loop and dispatches
+// their contents. It exits (and signals recvErr) on any stream error.
+func (r *Runner) runReceiver(
+	ctx context.Context,
+	stream agentv1.IngestService_HeartbeatClient,
+	recvErr chan<- error,
+) {
+	for {
+		resp, err := stream.Recv()
+		if err == io.EOF {
+			recvErr <- fmt.Errorf("server closed heartbeat stream")
+			return
+		}
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			recvErr <- fmt.Errorf("receiving heartbeat response: %w", err)
+			return
+		}
+		r.handleResponse(ctx, resp)
+	}
+}
+
+// handleResponse processes a single HeartbeatResponse from the server.
+func (r *Runner) handleResponse(ctx context.Context, resp *agentv1.HeartbeatResponse) {
+	if !resp.Ok {
+		slog.Warn("heartbeat rejected by server")
+	}
+	if resp.Command != "" {
+		slog.Info("received server command", "command", resp.Command)
+	}
+	if len(resp.Checks) > 0 {
+		r.executor.UpdateDefinitions(ctx, resp.Checks)
+	}
+	if len(resp.PendingQueries) > 0 {
+		// Run queries in a goroutine so the receive loop is never blocked by
+		// a slow subprocess. Dedupe against in-flight / already-completed IDs.
+		fresh := r.filterUnseenQueries(resp.PendingQueries)
+		if len(fresh) > 0 {
+			go r.executeQueries(fresh)
+		}
+	}
+	if resp.UpdateAvailable && resp.DownloadURL != "" {
+		slog.Info("agent update available, downloading",
+			"current", r.version,
+			"latest", resp.LatestVersion,
+		)
+		if err := updater.Update(resp.LatestVersion, resp.DownloadURL); err != nil {
+			slog.Warn("self-update failed, continuing with current version", "err", err)
+		}
+		// If Update succeeds it re-execs and never returns.
+	}
+}
+
+// filterUnseenQueries returns queries not yet seen for this stream's lifetime.
+func (r *Runner) filterUnseenQueries(queries []agentv1.AgentQuery) []agentv1.AgentQuery {
+	r.seenMu.Lock()
+	defer r.seenMu.Unlock()
+	out := make([]agentv1.AgentQuery, 0, len(queries))
+	for _, q := range queries {
+		if _, dup := r.seenQueryIDs[q.QueryID]; dup {
+			continue
+		}
+		r.seenQueryIDs[q.QueryID] = struct{}{}
+		out = append(out, q)
+	}
+	return out
+}
+
+// executeQueries runs each query, buffers the result, and nudges the send loop
+// to fire an immediate heartbeat with the results.
+func (r *Runner) executeQueries(queries []agentv1.AgentQuery) {
+	for _, q := range queries {
+		slog.Info("executing agent query", "query_id", q.QueryID, "type", q.QueryType)
+		result := checks.RunQuery(q)
+		r.queryResultsMu.Lock()
+		r.queryResults = append(r.queryResults, result)
+		r.queryResultsMu.Unlock()
+		slog.Info("agent query completed",
+			"query_id", q.QueryID,
+			"type", q.QueryType,
+			"status", result.Status,
+		)
+	}
+	// Non-blocking nudge — the channel has capacity 1, so if a nudge is
+	// already pending the send loop will pick up both batches on one wake.
+	select {
+	case r.resultsReady <- struct{}{}:
+	default:
+	}
+}
+
+// drainQueryResults atomically returns and clears all buffered query results.
+func (r *Runner) drainQueryResults() []agentv1.AgentQueryResult {
+	r.queryResultsMu.Lock()
+	defer r.queryResultsMu.Unlock()
+	results := r.queryResults
+	r.queryResults = nil
+	return results
+}
+
+func (r *Runner) sendHeartbeat(stream agentv1.IngestService_HeartbeatClient) error {
 	cpu, mem, disk, uptime, osVersion, disks, nets := r.collectMetrics()
 
 	req := &agentv1.HeartbeatRequest{
@@ -119,41 +257,12 @@ func (r *Runner) sendHeartbeat(ctx context.Context, stream agentv1.IngestService
 		Disks:             disks,
 		NetworkInterfaces: nets,
 		CheckResults:      r.executor.DrainResults(),
+		QueryResults:      r.drainQueryResults(),
 	}
 
 	if err := stream.Send(req); err != nil {
 		return fmt.Errorf("sending heartbeat: %w", err)
 	}
-
-	resp, err := stream.Recv()
-	if err == io.EOF {
-		return fmt.Errorf("server closed heartbeat stream")
-	}
-	if err != nil {
-		return fmt.Errorf("receiving heartbeat response: %w", err)
-	}
-
-	if !resp.Ok {
-		slog.Warn("heartbeat rejected by server")
-	}
-	if resp.Command != "" {
-		slog.Info("received server command", "command", resp.Command)
-	}
-	if len(resp.Checks) > 0 {
-		r.executor.UpdateDefinitions(ctx, resp.Checks)
-	}
-	if resp.UpdateAvailable && resp.DownloadURL != "" {
-		slog.Info("agent update available, downloading",
-			"current", r.version,
-			"latest", resp.LatestVersion,
-		)
-		if err := updater.Update(resp.LatestVersion, resp.DownloadURL); err != nil {
-			// Log and continue — a failed update must never crash the agent.
-			slog.Warn("self-update failed, continuing with current version", "err", err)
-		}
-		// If Update succeeds it re-execs and never returns.
-	}
-
 	return nil
 }
 

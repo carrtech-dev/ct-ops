@@ -4,18 +4,41 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
 import {
-  CheckCircle,
-  XCircle,
-  AlertTriangle,
   Plus,
   Trash2,
+  Pencil,
   ChevronDown,
   ChevronRight,
   ShieldCheck,
+  Sun,
+  CloudSun,
+  Cloud,
+  CloudRain,
+  CloudLightning,
+  Loader2,
+  Search,
 } from 'lucide-react'
+import {
+  BarChart,
+  Bar,
+  Cell,
+  XAxis,
+  Tooltip,
+  ResponsiveContainer,
+} from 'recharts'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import {
   Dialog,
   DialogContent,
@@ -34,16 +57,28 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import {
-  getChecks,
+  getChecksWithHistory,
   createCheck,
   updateCheck,
   deleteCheck,
-  getCheckResults,
+  deleteCheckHistory,
 } from '@/lib/actions/checks'
-import type { Check, CheckResultRow, CheckType } from '@/lib/db/schema'
+import type { CheckWithHistory } from '@/lib/actions/checks'
+import type {
+  CheckResultRow,
+  CheckType,
+  PortCheckConfig,
+  ProcessCheckConfig,
+  HttpCheckConfig,
+  AgentQueryStatus,
+  PortInfoResult,
+  ServiceInfoResult,
+} from '@/lib/db/schema'
 
-type CheckWithLatestResult = Check & {
-  latestResult: Pick<CheckResultRow, 'status' | 'ranAt' | 'output'> | null
+type AgentQueryPollResponse = {
+  status: AgentQueryStatus
+  result?: { ports?: PortInfoResult[]; services?: ServiceInfoResult[] }
+  error?: string
 }
 
 interface Props {
@@ -51,43 +86,10 @@ interface Props {
   hostId: string
 }
 
-function CheckStatusBadge({ status }: { status: string | null | undefined }) {
-  if (!status) {
-    return (
-      <Badge className="bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-100">
-        Never run
-      </Badge>
-    )
-  }
-  switch (status) {
-    case 'pass':
-      return (
-        <Badge className="bg-green-100 text-green-800 border-green-200 hover:bg-green-100">
-          <CheckCircle className="size-3 mr-1" />
-          Pass
-        </Badge>
-      )
-    case 'fail':
-      return (
-        <Badge className="bg-red-100 text-red-800 border-red-200 hover:bg-red-100">
-          <XCircle className="size-3 mr-1" />
-          Fail
-        </Badge>
-      )
-    case 'error':
-      return (
-        <Badge className="bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-100">
-          <AlertTriangle className="size-3 mr-1" />
-          Error
-        </Badge>
-      )
-    default:
-      return (
-        <Badge className="bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-100">
-          {status}
-        </Badge>
-      )
-  }
+const STATUS_COLOUR: Record<string, string> = {
+  pass: '#22c55e',
+  fail: '#ef4444',
+  error: '#f59e0b',
 }
 
 function CheckTypeBadge({ type }: { type: string }) {
@@ -115,40 +117,115 @@ function CheckTypeBadge({ type }: { type: string }) {
   }
 }
 
-function ResultHistory({ orgId, checkId }: { orgId: string; checkId: string }) {
-  const { data: results = [], isLoading } = useQuery({
-    queryKey: ['check-results', orgId, checkId],
-    queryFn: () => getCheckResults(orgId, checkId),
-  })
-
-  if (isLoading) {
-    return <p className="text-sm text-muted-foreground py-2">Loading results...</p>
-  }
-
-  if (results.length === 0) {
-    return <p className="text-sm text-muted-foreground py-2">No results yet.</p>
-  }
+function StatusDots({ results }: { results: CheckResultRow[] }) {
+  const last5 = [...results].slice(0, 5).reverse()
+  const empty = Math.max(0, 5 - last5.length)
 
   return (
-    <div className="mt-3 space-y-1">
-      {results.map((r: CheckResultRow) => (
-        <div
+    <div className="flex items-center gap-1" aria-label="Last 5 check results">
+      {Array.from({ length: empty }).map((_, i) => (
+        <span key={`e-${i}`} className="size-2.5 rounded-full bg-gray-200 inline-block" />
+      ))}
+      {last5.map((r) => (
+        <span
           key={r.id}
-          className="flex items-start gap-3 text-sm py-1.5 border-b last:border-0"
-        >
-          <div className="shrink-0 mt-0.5">
-            <CheckStatusBadge status={r.status} />
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-foreground truncate">{r.output ?? '—'}</p>
-            <p className="text-xs text-muted-foreground">
-              {formatDistanceToNow(new Date(r.ranAt), { addSuffix: true })}
-              {r.durationMs != null && ` · ${r.durationMs}ms`}
-            </p>
-          </div>
-        </div>
+          title={`${r.status} · ${formatDistanceToNow(new Date(r.ranAt), { addSuffix: true })}`}
+          className="size-2.5 rounded-full inline-block"
+          style={{ backgroundColor: STATUS_COLOUR[r.status] ?? '#9ca3af' }}
+        />
       ))}
     </div>
+  )
+}
+
+function StatusWeather({ results }: { results: CheckResultRow[] }) {
+  const last5 = results.slice(0, 5)
+
+  if (last5.length === 0) {
+    return (
+      <span title="Never run">
+        <Cloud className="size-4 text-muted-foreground" aria-label="No data" />
+      </span>
+    )
+  }
+
+  const pass = last5.filter((r) => r.status === 'pass').length
+  const fail = last5.filter((r) => r.status === 'fail').length
+  const error = last5.filter((r) => r.status === 'error').length
+  const total = last5.length
+  const parts: string[] = []
+  if (pass > 0) parts.push(`${pass} pass`)
+  if (fail > 0) parts.push(`${fail} fail`)
+  if (error > 0) parts.push(`${error} error`)
+  const label = parts.join(', ')
+
+  if (pass === total) {
+    return <span title={label}><Sun className="size-4 text-amber-400" aria-label="All passing" /></span>
+  }
+  if (pass >= Math.ceil(total * 0.8)) {
+    return <span title={label}><CloudSun className="size-4 text-amber-400" aria-label="Mostly passing" /></span>
+  }
+  if (pass >= Math.ceil(total * 0.4)) {
+    return <span title={label}><CloudRain className="size-4 text-blue-400" aria-label="Partially failing" /></span>
+  }
+  return <span title={label}><CloudLightning className="size-4 text-red-500" aria-label="Mostly failing" /></span>
+}
+
+function CheckHistoryChart({ results }: { results: CheckResultRow[] }) {
+  const data = [...results]
+    .reverse()
+    .map((r) => ({
+      id: r.id,
+      time: new Date(r.ranAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      duration: Math.max(1, r.durationMs ?? 1),
+      status: r.status,
+      output: r.output,
+    }))
+
+  return (
+    <ResponsiveContainer width="100%" height={72}>
+      <BarChart data={data} margin={{ top: 4, right: 0, left: 0, bottom: 0 }} barCategoryGap="10%">
+        <XAxis
+          dataKey="time"
+          tick={{ fontSize: 9, fill: '#9ca3af' }}
+          interval="preserveStartEnd"
+          axisLine={false}
+          tickLine={false}
+        />
+        <Tooltip
+          cursor={{ fill: 'transparent' }}
+          content={({ active, payload }) => {
+            if (!active || !payload?.[0]) return null
+            const d = payload[0].payload as (typeof data)[number]
+            return (
+              <div className="text-xs bg-white border rounded px-2 py-1.5 shadow-sm space-y-0.5">
+                <p
+                  className="font-medium"
+                  style={{ color: STATUS_COLOUR[d.status] ?? '#6b7280' }}
+                >
+                  {d.status}
+                </p>
+                {d.output && <p className="text-muted-foreground truncate max-w-48">{d.output}</p>}
+                <p className="text-muted-foreground">{d.time}</p>
+                <p className="text-muted-foreground">
+                  Response time:{' '}
+                  <span className="text-foreground font-medium">{d.duration}ms</span>
+                </p>
+              </div>
+            )
+          }}
+        />
+        <Bar dataKey="duration" minPointSize={6} radius={[2, 2, 0, 0]}>
+          {data.map((entry) => (
+            <Cell
+              key={entry.id}
+              fill={STATUS_COLOUR[entry.status] ?? '#9ca3af'}
+              fillOpacity={0.85}
+            />
+          ))}
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
   )
 }
 
@@ -169,16 +246,53 @@ function AddCheckDialog({
   const [intervalSeconds, setIntervalSeconds] = useState(60)
   const [error, setError] = useState('')
 
-  // Port config
   const [portHost, setPortHost] = useState('')
   const [portPort, setPortPort] = useState('')
-
-  // Process config
   const [processName, setProcessName] = useState('')
-
-  // HTTP config
   const [httpUrl, setHttpUrl] = useState('')
   const [httpStatus, setHttpStatus] = useState('200')
+
+  // Ad-hoc agent query ("Query server" button) state
+  const [queryId, setQueryId] = useState<string | null>(null)
+  const [queryError, setQueryError] = useState<string | null>(null)
+
+  const { data: queryData } = useQuery<AgentQueryPollResponse>({
+    queryKey: ['agent-query', hostId, queryId],
+    queryFn: async () => {
+      const res = await fetch(`/api/hosts/${hostId}/queries/${queryId}`)
+      if (!res.ok) throw new Error('Failed to poll query')
+      return res.json()
+    },
+    enabled: queryId !== null,
+    refetchInterval: (q) => {
+      const s = q.state.data?.status
+      return s === 'complete' || s === 'error' ? false : 1_000
+    },
+  })
+
+  async function handleQuery(queryType: 'list_ports' | 'list_services') {
+    setQueryId(null)
+    setQueryError(null)
+    try {
+      const res = await fetch(`/api/hosts/${hostId}/queries`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ queryType }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setQueryError(data.error ?? 'Failed to start query')
+        return
+      }
+      setQueryId(data.id)
+    } catch {
+      setQueryError('Failed to start query')
+    }
+  }
+
+  const isQuerying = queryId !== null && queryData?.status === 'pending'
+  const queryErrored = queryData?.status === 'error' || queryError !== null
+  const queryErrorMessage = queryError ?? queryData?.error ?? null
 
   const { mutate, isPending } = useMutation({
     mutationFn: async () => {
@@ -197,7 +311,7 @@ function AddCheckDialog({
         setError(result.error)
         return
       }
-      queryClient.invalidateQueries({ queryKey: ['checks', orgId, hostId] })
+      queryClient.invalidateQueries({ queryKey: ['checks-history', orgId, hostId] })
       onOpenChange(false)
       resetForm()
     },
@@ -216,6 +330,8 @@ function AddCheckDialog({
     setHttpUrl('')
     setHttpStatus('200')
     setError('')
+    setQueryId(null)
+    setQueryError(null)
   }
 
   return (
@@ -251,40 +367,144 @@ function AddCheckDialog({
           </div>
 
           {checkType === 'port' && (
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="port-host">Host</Label>
-                <Input
-                  id="port-host"
-                  value={portHost}
-                  onChange={(e) => setPortHost(e.target.value)}
-                  placeholder="localhost"
-                />
+            <div className="space-y-2">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="port-host">Host</Label>
+                  <Input
+                    id="port-host"
+                    value={portHost}
+                    onChange={(e) => setPortHost(e.target.value)}
+                    placeholder="localhost"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="port-port">Port</Label>
+                  <Input
+                    id="port-port"
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={portPort}
+                    onChange={(e) => setPortPort(e.target.value)}
+                    placeholder="5432"
+                  />
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="port-port">Port</Label>
-                <Input
-                  id="port-port"
-                  type="number"
-                  min={1}
-                  max={65535}
-                  value={portPort}
-                  onChange={(e) => setPortPort(e.target.value)}
-                  placeholder="5432"
-                />
+
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleQuery('list_ports')}
+                  disabled={isQuerying}
+                >
+                  {isQuerying ? (
+                    <>
+                      <Loader2 className="size-3.5 mr-1.5 animate-spin" />
+                      Querying server…
+                    </>
+                  ) : (
+                    <>
+                      <Search className="size-3.5 mr-1.5" />
+                      Query server
+                    </>
+                  )}
+                </Button>
+                {queryErrored && queryErrorMessage && (
+                  <p className="text-xs text-red-600">{queryErrorMessage}</p>
+                )}
               </div>
+
+              {queryData?.status === 'complete' && queryData.result?.ports && (
+                <div className="rounded-md border bg-muted/50 p-2 space-y-0.5 max-h-48 overflow-y-auto">
+                  <p className="text-xs text-muted-foreground font-medium px-1 pb-1">
+                    {queryData.result.ports.length === 0
+                      ? 'No listening ports found'
+                      : 'Select a listening port'}
+                  </p>
+                  {queryData.result.ports.map((p, i) => (
+                    <button
+                      key={`${p.port}-${p.process ?? ''}-${i}`}
+                      type="button"
+                      onClick={() => {
+                        setPortPort(String(p.port))
+                        if (!portHost) setPortHost('localhost')
+                        setQueryId(null)
+                      }}
+                      className="w-full text-left text-sm px-2 py-1.5 rounded hover:bg-accent flex items-center justify-between text-foreground"
+                    >
+                      <span className="font-mono">{p.protocol}:{p.port}</span>
+                      {p.process && (
+                        <span className="text-xs text-muted-foreground">{p.process}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
           {checkType === 'process' && (
-            <div className="space-y-1.5">
-              <Label htmlFor="process-name">Process name</Label>
-              <Input
-                id="process-name"
-                value={processName}
-                onChange={(e) => setProcessName(e.target.value)}
-                placeholder="nginx"
-              />
+            <div className="space-y-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="process-name">Process name</Label>
+                <Input
+                  id="process-name"
+                  value={processName}
+                  onChange={(e) => setProcessName(e.target.value)}
+                  placeholder="nginx"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleQuery('list_services')}
+                  disabled={isQuerying}
+                >
+                  {isQuerying ? (
+                    <>
+                      <Loader2 className="size-3.5 mr-1.5 animate-spin" />
+                      Querying server…
+                    </>
+                  ) : (
+                    <>
+                      <Search className="size-3.5 mr-1.5" />
+                      Query server
+                    </>
+                  )}
+                </Button>
+                {queryErrored && queryErrorMessage && (
+                  <p className="text-xs text-red-600">{queryErrorMessage}</p>
+                )}
+              </div>
+
+              {queryData?.status === 'complete' && queryData.result?.services && (
+                <div className="rounded-md border bg-muted/50 p-2 space-y-0.5 max-h-48 overflow-y-auto">
+                  <p className="text-xs text-muted-foreground font-medium px-1 pb-1">
+                    {queryData.result.services.length === 0
+                      ? 'No running services found'
+                      : 'Select a running service'}
+                  </p>
+                  {queryData.result.services.map((s, i) => (
+                    <button
+                      key={`${s.name}-${i}`}
+                      type="button"
+                      onClick={() => {
+                        setProcessName(s.name.replace(/\.service$/, ''))
+                        setQueryId(null)
+                      }}
+                      className="w-full text-left text-sm px-2 py-1.5 rounded hover:bg-accent text-foreground"
+                    >
+                      <span className="font-mono">{s.name}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -340,34 +560,270 @@ function AddCheckDialog({
   )
 }
 
+function EditCheckDialog({
+  check,
+  open,
+  onOpenChange,
+  orgId,
+  hostId,
+}: {
+  check: CheckWithHistory
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  orgId: string
+  hostId: string
+}) {
+  const queryClient = useQueryClient()
+
+  const initFields = () => {
+    const cfg = check.config as PortCheckConfig & ProcessCheckConfig & HttpCheckConfig
+    return {
+      name: check.name,
+      intervalSeconds: check.intervalSeconds,
+      portHost: cfg.host ?? '',
+      portPort: cfg.port != null ? String(cfg.port) : '',
+      processName: cfg.process_name ?? '',
+      httpUrl: cfg.url ?? '',
+      httpStatus: cfg.expected_status != null ? String(cfg.expected_status) : '200',
+    }
+  }
+
+  const [name, setName] = useState(check.name)
+  const [intervalSeconds, setIntervalSeconds] = useState(check.intervalSeconds)
+  const [portHost, setPortHost] = useState(() => initFields().portHost)
+  const [portPort, setPortPort] = useState(() => initFields().portPort)
+  const [processName, setProcessName] = useState(() => initFields().processName)
+  const [httpUrl, setHttpUrl] = useState(() => initFields().httpUrl)
+  const [httpStatus, setHttpStatus] = useState(() => initFields().httpStatus)
+  const [error, setError] = useState('')
+  const [confirmClearHistory, setConfirmClearHistory] = useState(false)
+
+  // Re-sync when the dialog opens
+  const handleOpenChange = (v: boolean) => {
+    if (v) {
+      const f = initFields()
+      setName(f.name)
+      setIntervalSeconds(check.intervalSeconds)
+      setPortHost(f.portHost)
+      setPortPort(f.portPort)
+      setProcessName(f.processName)
+      setHttpUrl(f.httpUrl)
+      setHttpStatus(f.httpStatus)
+      setError('')
+      setConfirmClearHistory(false)
+    }
+    onOpenChange(v)
+  }
+
+  const { mutate: clearHistory, isPending: isClearingHistory } = useMutation({
+    mutationFn: () => deleteCheckHistory(orgId, check.id),
+    onSuccess: (result) => {
+      if ('error' in result) {
+        setError(result.error)
+        return
+      }
+      queryClient.invalidateQueries({ queryKey: ['checks-history', orgId, hostId] })
+      setConfirmClearHistory(false)
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : 'Something went wrong')
+    },
+  })
+
+  const { mutate, isPending } = useMutation({
+    mutationFn: async () => {
+      let config: unknown
+      if (check.checkType === 'port') {
+        config = { host: portHost, port: parseInt(portPort, 10) }
+      } else if (check.checkType === 'process') {
+        config = { process_name: processName }
+      } else {
+        config = { url: httpUrl, expected_status: parseInt(httpStatus, 10) || 200 }
+      }
+      return updateCheck(orgId, check.id, { name, config, intervalSeconds })
+    },
+    onSuccess: (result) => {
+      if ('error' in result) {
+        setError(result.error)
+        return
+      }
+      queryClient.invalidateQueries({ queryKey: ['checks-history', orgId, hostId] })
+      onOpenChange(false)
+    },
+    onError: (err) => {
+      setError(err instanceof Error ? err.message : 'Something went wrong')
+    },
+  })
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit Check</DialogTitle>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-check-name">Name</Label>
+            <Input
+              id="edit-check-name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          </div>
+
+          {check.checkType === 'port' && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-port-host">Host</Label>
+                <Input
+                  id="edit-port-host"
+                  value={portHost}
+                  onChange={(e) => setPortHost(e.target.value)}
+                  placeholder="localhost"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-port-port">Port</Label>
+                <Input
+                  id="edit-port-port"
+                  type="number"
+                  min={1}
+                  max={65535}
+                  value={portPort}
+                  onChange={(e) => setPortPort(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+
+          {check.checkType === 'process' && (
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-process-name">Process name</Label>
+              <Input
+                id="edit-process-name"
+                value={processName}
+                onChange={(e) => setProcessName(e.target.value)}
+              />
+            </div>
+          )}
+
+          {check.checkType === 'http' && (
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-http-url">URL</Label>
+                <Input
+                  id="edit-http-url"
+                  value={httpUrl}
+                  onChange={(e) => setHttpUrl(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="edit-http-status">Expected status code</Label>
+                <Input
+                  id="edit-http-status"
+                  type="number"
+                  value={httpStatus}
+                  onChange={(e) => setHttpStatus(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-interval">Interval (seconds)</Label>
+            <Input
+              id="edit-interval"
+              type="number"
+              min={10}
+              max={3600}
+              value={intervalSeconds}
+              onChange={(e) => setIntervalSeconds(parseInt(e.target.value, 10) || 60)}
+            />
+          </div>
+
+          {error && <p className="text-sm text-red-600">{error}</p>}
+        </div>
+
+        <DialogFooter className="flex-col gap-2 sm:flex-row sm:justify-between">
+          <div className="flex items-center gap-2">
+            {confirmClearHistory ? (
+              <>
+                <span className="text-sm text-muted-foreground">Delete all history?</span>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => clearHistory()}
+                  disabled={isClearingHistory}
+                >
+                  {isClearingHistory ? 'Deleting...' : 'Confirm'}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setConfirmClearHistory(false)}
+                  disabled={isClearingHistory}
+                >
+                  Cancel
+                </Button>
+              </>
+            ) : (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-red-600"
+                onClick={() => setConfirmClearHistory(true)}
+                disabled={check.results.length === 0}
+              >
+                Delete history
+              </Button>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button onClick={() => mutate()} disabled={isPending || !name}>
+              {isPending ? 'Saving...' : 'Save changes'}
+            </Button>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function CheckRow({
   check,
   orgId,
   hostId,
 }: {
-  check: CheckWithLatestResult
+  check: CheckWithHistory
   orgId: string
   hostId: string
 }) {
   const queryClient = useQueryClient()
   const [expanded, setExpanded] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
 
   const { mutate: toggleEnabled } = useMutation({
     mutationFn: (enabled: boolean) => updateCheck(orgId, check.id, { enabled }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['checks', orgId, hostId] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['checks-history', orgId, hostId] }),
   })
 
   const { mutate: remove, isPending: isDeleting } = useMutation({
     mutationFn: () => deleteCheck(orgId, check.id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['checks', orgId, hostId] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['checks-history', orgId, hostId] }),
   })
 
   return (
+    <>
     <div className="border rounded-lg">
       <div className="flex items-center gap-3 p-3">
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="text-muted-foreground hover:text-foreground"
+          className="text-muted-foreground hover:text-foreground shrink-0"
           aria-label={expanded ? 'Collapse' : 'Expand'}
         >
           {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
@@ -377,13 +833,16 @@ function CheckRow({
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium text-sm text-foreground">{check.name}</span>
             <CheckTypeBadge type={check.checkType} />
-            <CheckStatusBadge status={check.latestResult?.status} />
           </div>
-          {check.latestResult && (
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Last run {formatDistanceToNow(new Date(check.latestResult.ranAt), { addSuffix: true })}
-            </p>
-          )}
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
+            <StatusDots results={check.results} />
+            <StatusWeather results={check.results} />
+            {check.latestResult && (
+              <span className="text-xs text-muted-foreground">
+                · {formatDistanceToNow(new Date(check.latestResult.ranAt), { addSuffix: true })}
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-2 shrink-0">
@@ -395,8 +854,17 @@ function CheckRow({
           <Button
             variant="ghost"
             size="icon"
+            className="size-8 text-muted-foreground hover:text-foreground"
+            onClick={() => setEditOpen(true)}
+            aria-label="Edit check"
+          >
+            <Pencil className="size-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
             className="size-8 text-muted-foreground hover:text-red-600"
-            onClick={() => remove()}
+            onClick={() => setDeleteOpen(true)}
             disabled={isDeleting}
             aria-label="Delete check"
           >
@@ -406,22 +874,114 @@ function CheckRow({
       </div>
 
       {expanded && (
-        <div className="px-3 pb-3 border-t pt-3">
-          <ResultHistory orgId={orgId} checkId={check.id} />
+        <div className="border-t px-3 pt-3 pb-3">
+          {check.results.length > 0 ? (
+            <>
+              <p className="text-xs text-muted-foreground mb-2">
+                {check.results.length} result{check.results.length === 1 ? '' : 's'} stored
+                {check.latestResult?.output && (
+                  <> · <span className="text-foreground">{check.latestResult.output}</span></>
+                )}
+              </p>
+              <CheckHistoryChart results={check.results} />
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground py-2">No results yet.</p>
+          )}
         </div>
       )}
     </div>
+
+    <EditCheckDialog
+      check={check}
+      open={editOpen}
+      onOpenChange={setEditOpen}
+      orgId={orgId}
+      hostId={hostId}
+    />
+
+    <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete check</AlertDialogTitle>
+          <AlertDialogDescription>
+            Are you sure you want to delete <strong>{check.name}</strong>? This will remove all
+            associated history and cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-red-600 hover:bg-red-700 text-white"
+            onClick={() => remove()}
+          >
+            Delete
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   )
+}
+
+function flapCount(results: CheckResultRow[]): number {
+  let flaps = 0
+  for (let i = 1; i < results.length; i++) {
+    if (results[i]!.status !== results[i - 1]!.status) flaps++
+  }
+  return flaps
+}
+
+function mostRecentNegativeMs(results: CheckResultRow[]): number {
+  const hit = results.find((r) => r.status === 'fail' || r.status === 'error')
+  return hit ? new Date(hit.ranAt).getTime() : 0
+}
+
+function sortedChecks(checks: CheckWithHistory[]): CheckWithHistory[] {
+  return [...checks].sort((a, b) => {
+    const flapsB = flapCount(b.results)
+    const flapsA = flapCount(a.results)
+    if (flapsB !== flapsA) return flapsB - flapsA
+    return mostRecentNegativeMs(b.results) - mostRecentNegativeMs(a.results)
+  })
 }
 
 export function ChecksTab({ orgId, hostId }: Props) {
   const [addOpen, setAddOpen] = useState(false)
 
-  const { data: checks = [], isLoading } = useQuery({
-    queryKey: ['checks', orgId, hostId],
-    queryFn: () => getChecks(orgId, hostId),
+  const { data: rawChecks = [], isLoading } = useQuery({
+    queryKey: ['checks-history', orgId, hostId],
+    queryFn: () => getChecksWithHistory(orgId, hostId),
     refetchInterval: 30_000,
   })
+
+  const checks = sortedChecks(rawChecks)
+
+  const healthSummary = (() => {
+    if (checks.length === 0) return null
+    const passing = checks.filter((c) => c.latestResult?.status === 'pass').length
+    const failing = checks.filter((c) => c.latestResult?.status === 'fail' || c.latestResult?.status === 'error').length
+    const pending = checks.filter((c) => !c.latestResult).length
+    const total = checks.length
+    const passRatio = total > 0 ? passing / total : 0
+
+    let WeatherIcon: typeof Sun
+    let iconClass: string
+    let headline: string
+    if (passRatio === 1) {
+      WeatherIcon = Sun; iconClass = 'text-amber-400'; headline = 'All checks passing'
+    } else if (passRatio >= 0.8) {
+      WeatherIcon = CloudSun; iconClass = 'text-amber-400'; headline = 'Mostly healthy'
+    } else if (passRatio >= 0.4) {
+      WeatherIcon = CloudRain; iconClass = 'text-blue-400'; headline = 'Partially degraded'
+    } else if (passing === 0 && pending === total) {
+      WeatherIcon = Cloud; iconClass = 'text-muted-foreground'; headline = 'Awaiting results'
+    } else {
+      WeatherIcon = CloudLightning; iconClass = 'text-red-500'; headline = 'Degraded'
+    }
+
+    return { WeatherIcon, iconClass, headline, passing, failing, pending, total }
+  })()
 
   return (
     <div className="space-y-4">
@@ -434,6 +994,27 @@ export function ChecksTab({ orgId, hostId }: Props) {
           Add check
         </Button>
       </div>
+
+      {healthSummary && (
+        <Card>
+          <CardContent className="flex items-center gap-4 py-4">
+            <healthSummary.WeatherIcon className={`size-10 shrink-0 ${healthSummary.iconClass}`} />
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-foreground">{healthSummary.headline}</p>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {healthSummary.passing} passing
+                {healthSummary.failing > 0 && (
+                  <> · <span className="text-red-600 font-medium">{healthSummary.failing} failing</span></>
+                )}
+                {healthSummary.pending > 0 && (
+                  <> · {healthSummary.pending} pending</>
+                )}
+                {' '}of {healthSummary.total} check{healthSummary.total === 1 ? '' : 's'}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {isLoading ? (
         <p className="text-sm text-muted-foreground">Loading...</p>

@@ -5,6 +5,7 @@ import { db } from '@/lib/db'
 import { users } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
 import { getHost } from '@/lib/actions/agents'
+import { getChecksWithHistory } from '@/lib/actions/checks'
 
 export const dynamic = 'force-dynamic'
 
@@ -39,6 +40,7 @@ export async function GET(
         return
       }
       send('update', initial)
+      send('checks', await getChecksWithHistory(orgId, hostId))
 
       const interval = setInterval(async () => {
         try {
@@ -50,6 +52,7 @@ export async function GET(
             return
           }
           send('update', host)
+          send('checks', await getChecksWithHistory(orgId, hostId))
         } catch {
           // transient DB error — skip this tick
         }

@@ -36,6 +36,39 @@ message CheckResult {
   int64  ran_at_unix = 5;
 }
 
+// AgentQuery is pushed from the server to instruct the agent to run a one-shot
+// enumeration query (e.g. list listening ports, list running services) and
+// return the results on the next heartbeat.
+message AgentQuery {
+  string query_id   = 1;
+  string query_type = 2;  // "list_ports" | "list_services"
+}
+
+// PortInfo describes a single listening TCP port discovered on the host.
+message PortInfo {
+  int32  port     = 1;
+  string protocol = 2;  // "tcp"
+  string process  = 3;
+}
+
+// ServiceInfo describes a single systemd service unit.
+message ServiceInfo {
+  string name        = 1;
+  string load_state  = 2;
+  string active_sub  = 3;
+}
+
+// AgentQueryResult is returned by the agent in a HeartbeatRequest after
+// executing an AgentQuery pushed to it via a HeartbeatResponse.
+message AgentQueryResult {
+  string       query_id   = 1;
+  string       query_type = 2;
+  string       status     = 3;  // "ok" | "error"
+  string       error      = 4;
+  repeated PortInfo    ports    = 5;
+  repeated ServiceInfo services = 6;
+}
+
 message HeartbeatRequest {
   string    agent_id      = 1;
   float     cpu_percent   = 2;
@@ -50,6 +83,7 @@ message HeartbeatRequest {
   repeated DiskInfo          disks              = 9;
   repeated NetworkInterface  network_interfaces = 10;
   repeated CheckResult       check_results      = 13;
+  repeated AgentQueryResult  query_results      = 14;
 }
 
 message HeartbeatResponse {
@@ -60,4 +94,5 @@ message HeartbeatResponse {
   bool update_available = 5;  // true when agent_version != latest_version
   string download_url = 6;    // base URL to fetch the updated binary from
   repeated CheckDefinition checks = 7;
+  repeated AgentQuery pending_queries = 8;
 }

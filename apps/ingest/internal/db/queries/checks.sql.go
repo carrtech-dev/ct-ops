@@ -41,7 +41,7 @@ func GetChecksForHost(ctx context.Context, pool *pgxpool.Pool, hostID string) ([
 	return result, rows.Err()
 }
 
-// InsertCheckResult persists a single check result row.
+// InsertCheckResult persists a single check result row and prunes old rows beyond 100 per check.
 func InsertCheckResult(
 	ctx context.Context,
 	pool *pgxpool.Pool,
@@ -54,8 +54,26 @@ func InsertCheckResult(
 		INSERT INTO check_results (id, check_id, host_id, organisation_id, ran_at, status, output, duration_ms)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`
-	_, err := pool.Exec(ctx, q,
+	if _, err := pool.Exec(ctx, q,
 		newCUID(), checkID, hostID, orgID, ranAt, status, output, durationMs,
-	)
+	); err != nil {
+		return err
+	}
+	return pruneCheckResults(ctx, pool, checkID)
+}
+
+// pruneCheckResults deletes rows beyond the 100 most recent results for a check.
+func pruneCheckResults(ctx context.Context, pool *pgxpool.Pool, checkID string) error {
+	const q = `
+		DELETE FROM check_results
+		WHERE check_id = $1
+		  AND id NOT IN (
+		    SELECT id FROM check_results
+		    WHERE check_id = $1
+		    ORDER BY ran_at DESC
+		    LIMIT 100
+		  )
+	`
+	_, err := pool.Exec(ctx, q, checkID)
 	return err
 }

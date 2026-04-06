@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { HostWithAgent } from '@/lib/actions/agents'
+import type { CheckWithHistory } from '@/lib/actions/checks'
 
 export function useHostStream({ hostId, orgId }: { hostId: string; orgId: string }) {
   const queryClient = useQueryClient()
@@ -18,6 +19,15 @@ export function useHostStream({ hostId, orgId }: { hostId: string; orgId: string
       try {
         const host: HostWithAgent = JSON.parse(e.data)
         queryClient.setQueryData(['host', orgId, hostId], host)
+      } catch {
+        // malformed JSON — ignore
+      }
+    })
+
+    es.addEventListener('checks', (e) => {
+      try {
+        const checks: CheckWithHistory[] = JSON.parse(e.data)
+        queryClient.setQueryData(['checks-history', orgId, hostId], checks)
       } catch {
         // malformed JSON — ignore
       }
