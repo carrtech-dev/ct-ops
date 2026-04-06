@@ -57,6 +57,13 @@
       "when": 1775500633198,
       "tag": "0007_bitter_firestar",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1775900000000,
+      "tag": "0008_alert_rules",
+      "breakpoints": true
     }
   ]
 }

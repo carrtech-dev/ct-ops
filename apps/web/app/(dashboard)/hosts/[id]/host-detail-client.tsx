@@ -42,12 +42,15 @@ import type { HostWithAgent, MetricsRange, OfflinePeriod } from '@/lib/actions/a
 import { useHostStream } from '@/hooks/use-host-stream'
 import type { DiskInfo, NetworkInterface } from '@/lib/db/schema'
 import { ChecksTab } from './checks-tab'
+import { AlertsTab } from './alerts-tab'
+import { getAlertInstances } from '@/lib/actions/alerts'
 
-type Tab = 'overview' | 'storage' | 'network' | 'metrics' | 'checks'
+type Tab = 'overview' | 'storage' | 'network' | 'metrics' | 'checks' | 'alerts'
 
 interface Props {
   host: HostWithAgent
   orgId: string
+  currentUserId: string
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -144,7 +147,7 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
   )
 }
 
-export function HostDetailClient({ host: initialHost, orgId }: Props) {
+export function HostDetailClient({ host: initialHost, orgId, currentUserId }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('overview')
   const [metricsRange, setMetricsRange] = useState<MetricsRange>('24h')
 
@@ -173,6 +176,13 @@ export function HostDetailClient({ host: initialHost, orgId }: Props) {
     enabled: activeTab === 'metrics' && !!initialHost.agentId,
     refetchInterval: 60_000,
   })
+
+  const { data: activeAlerts = [] } = useQuery({
+    queryKey: ['alerts', orgId, 'firing', initialHost.id],
+    queryFn: () => getAlertInstances(orgId, { status: 'firing', hostId: initialHost.id }),
+    refetchInterval: 30_000,
+  })
+  const activeAlertCount = activeAlerts.length
 
   const tickFormat = metricsRange === '7d' ? 'MMM d HH:mm' : 'HH:mm'
 
@@ -271,6 +281,14 @@ export function HostDetailClient({ host: initialHost, orgId }: Props) {
         </TabButton>
         <TabButton active={activeTab === 'checks'} onClick={() => setActiveTab('checks')}>
           Checks
+        </TabButton>
+        <TabButton active={activeTab === 'alerts'} onClick={() => setActiveTab('alerts')}>
+          Alerts
+          {activeAlertCount > 0 && (
+            <span className="ml-1.5 text-xs bg-red-100 text-red-800 rounded-full px-1.5 py-0.5">
+              {activeAlertCount}
+            </span>
+          )}
         </TabButton>
       </div>
 
@@ -555,6 +573,11 @@ export function HostDetailClient({ host: initialHost, orgId }: Props) {
       {/* Checks Tab */}
       {activeTab === 'checks' && (
         <ChecksTab orgId={orgId} hostId={initialHost.id} />
+      )}
+
+      {/* Alerts Tab */}
+      {activeTab === 'alerts' && (
+        <AlertsTab orgId={orgId} hostId={initialHost.id} currentUserId={currentUserId} />
       )}
 
       {/* Network Tab */}

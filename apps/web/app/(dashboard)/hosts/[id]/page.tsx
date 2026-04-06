@@ -20,5 +20,5 @@ export default async function HostDetailPage({ params }: Props) {
   const host = await getHost(orgId, id)
   if (!host) notFound()
 
-  return <HostDetailClient host={host} orgId={orgId} />
+  return <HostDetailClient host={host} orgId={orgId} currentUserId={session.user.id} />
 }

@@ -103,7 +103,7 @@ func (h *HeartbeatHandler) Heartbeat(stream agentv1.IngestService_HeartbeatServe
 	slog.Info("heartbeat stream started", "agent_id", agentID)
 
 	// Process first message
-	if err := h.processHeartbeat(ctx, stream, agentID, agent.OrganisationID, hostID, first); err != nil {
+	if err := h.processHeartbeat(ctx, stream, agentID, agent.OrganisationID, hostID, agent.Hostname, first); err != nil {
 		return err
 	}
 
@@ -149,7 +149,7 @@ loop:
 			if !ok {
 				break loop
 			}
-			if err := h.processHeartbeat(ctx, stream, agentID, agent.OrganisationID, hostID, req); err != nil {
+			if err := h.processHeartbeat(ctx, stream, agentID, agent.OrganisationID, hostID, agent.Hostname, req); err != nil {
 				return err
 			}
 
@@ -195,7 +195,7 @@ loop:
 func (h *HeartbeatHandler) processHeartbeat(
 	ctx context.Context,
 	stream agentv1.IngestService_HeartbeatServer,
-	agentID, orgID, hostID string,
+	agentID, orgID, hostID, hostname string,
 	req *agentv1.HeartbeatRequest,
 ) error {
 	now := time.Now()
@@ -241,6 +241,17 @@ func (h *HeartbeatHandler) processHeartbeat(
 				slog.Warn("inserting check result", "check_id", result.CheckID, "err", err)
 			}
 		}
+
+		// Evaluate alert rules for this heartbeat.
+		checkStatuses := make(map[string]string, len(req.CheckResults))
+		for _, result := range req.CheckResults {
+			checkStatuses[result.CheckID] = result.Status
+		}
+		evaluateAlerts(ctx, h.pool, orgID, hostID, hostname, checkStatuses, heartbeatMetrics{
+			CPU:    req.CpuPercent,
+			Memory: req.MemoryPercent,
+			Disk:   req.DiskPercent,
+		})
 	}
 
 	// Persist incoming ad-hoc agent query results
