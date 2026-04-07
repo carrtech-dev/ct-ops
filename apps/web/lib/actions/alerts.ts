@@ -1,9 +1,11 @@
 'use server'
 
 import { z } from 'zod'
+import { createHmac } from 'crypto'
+import nodemailer from 'nodemailer'
 import { db } from '@/lib/db'
-import { alertRules, alertInstances, notificationChannels, hosts } from '@/lib/db/schema'
-import { eq, and, isNull, desc, inArray, sql } from 'drizzle-orm'
+import { alertRules, alertInstances, notificationChannels, alertSilences, hosts } from '@/lib/db/schema'
+import { eq, and, isNull, desc, inArray, sql, lte, gte } from 'drizzle-orm'
 import type {
   AlertRule,
   AlertInstance,
@@ -13,6 +15,8 @@ import type {
   NotificationChannel,
   WebhookChannelConfig,
   SmtpChannelConfig,
+  SmtpEncryption,
+  AlertSilence,
 } from '@/lib/db/schema'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -51,6 +55,8 @@ const updateAlertRuleSchema = z.object({
   config: z.union([checkStatusConfigSchema, metricThresholdConfigSchema]).optional(),
 })
 
+const smtpEncryptionSchema = z.enum(['none', 'starttls', 'tls'])
+
 const createNotificationChannelSchema = z.discriminatedUnion('type', [
   z.object({
     name: z.string().min(1).max(100),
@@ -66,7 +72,7 @@ const createNotificationChannelSchema = z.discriminatedUnion('type', [
     config: z.object({
       host: z.string().min(1),
       port: z.number().int().min(1).max(65535),
-      secure: z.boolean(),
+      encryption: smtpEncryptionSchema,
       username: z.string().optional(),
       password: z.string().optional(),
       fromAddress: z.string().email(),
@@ -366,8 +372,30 @@ export async function getActiveAlertCountsForHosts(
 
 export type NotificationChannelSafe = Omit<NotificationChannel, 'config' | 'type'> & (
   | { type: 'webhook'; config: { url: string; hasSecret: boolean } }
-  | { type: 'smtp'; config: { host: string; port: number; fromAddress: string; toAddresses: string[]; hasPassword: boolean } }
+  | {
+      type: 'smtp'
+      config: {
+        host: string
+        port: number
+        encryption: SmtpEncryption
+        username?: string
+        fromAddress: string
+        fromName?: string
+        toAddresses: string[]
+        hasPassword: boolean
+      }
+    }
 )
+
+/** Normalise SMTP config rows written before the encryption field was introduced. */
+function normaliseSmtpConfig(raw: unknown): SmtpChannelConfig {
+  const obj = raw as Record<string, unknown>
+  if (obj.encryption !== undefined) return obj as unknown as SmtpChannelConfig
+  // Rows written with the old `secure: boolean` field
+  const encryption: SmtpEncryption = obj.secure ? 'tls' : 'starttls'
+  const { secure: _removed, ...rest } = obj
+  return { ...rest, encryption } as unknown as SmtpChannelConfig
+}
 
 export async function getNotificationChannels(orgId: string): Promise<NotificationChannelSafe[]> {
   const rows = await db.query.notificationChannels.findMany({
@@ -380,14 +408,17 @@ export async function getNotificationChannels(orgId: string): Promise<Notificati
 
   return rows.map((ch) => {
     if (ch.type === 'smtp') {
-      const cfg = ch.config as SmtpChannelConfig
+      const cfg = normaliseSmtpConfig(ch.config)
       return {
         ...ch,
         type: 'smtp' as const,
         config: {
           host: cfg.host,
           port: cfg.port,
+          encryption: cfg.encryption,
+          username: cfg.username,
           fromAddress: cfg.fromAddress,
+          fromName: cfg.fromName,
           toAddresses: cfg.toAddresses,
           hasPassword: !!(cfg.password),
         },
@@ -452,6 +483,269 @@ export async function deleteNotificationChannel(
     .where(
       and(eq(notificationChannels.id, channelId), eq(notificationChannels.organisationId, orgId)),
     )
+
+  return { success: true }
+}
+
+const updateWebhookChannelSchema = z.object({
+  name: z.string().min(1).max(100),
+  url: z.string().url(),
+  secret: z.string().optional(),
+})
+
+const updateSmtpChannelSchema = z.object({
+  name: z.string().min(1).max(100),
+  host: z.string().min(1),
+  port: z.number().int().min(1).max(65535),
+  encryption: smtpEncryptionSchema,
+  username: z.string().optional(),
+  password: z.string().optional(),
+  fromAddress: z.string().email(),
+  fromName: z.string().optional(),
+  toAddresses: z.array(z.string().email()).min(1),
+})
+
+export async function updateNotificationChannel(
+  orgId: string,
+  channelId: string,
+  input: unknown,
+): Promise<{ success: true } | { error: string }> {
+  const existing = await db.query.notificationChannels.findFirst({
+    where: and(
+      eq(notificationChannels.id, channelId),
+      eq(notificationChannels.organisationId, orgId),
+      isNull(notificationChannels.deletedAt),
+    ),
+  })
+  if (!existing) return { error: 'Notification channel not found' }
+
+  try {
+    if (existing.type === 'webhook') {
+      const parsed = updateWebhookChannelSchema.safeParse(input)
+      if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Invalid input' }
+      const { name, url, secret } = parsed.data
+      const existingConfig = existing.config as WebhookChannelConfig
+      const newConfig: WebhookChannelConfig = {
+        url,
+        // Non-empty string replaces; empty/absent keeps existing
+        secret: secret || existingConfig.secret,
+      }
+      await db
+        .update(notificationChannels)
+        .set({ name, config: newConfig, updatedAt: new Date() })
+        .where(and(eq(notificationChannels.id, channelId), eq(notificationChannels.organisationId, orgId)))
+    } else {
+      const parsed = updateSmtpChannelSchema.safeParse(input)
+      if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? 'Invalid input' }
+      const { name, host, port, encryption, username, password, fromAddress, fromName, toAddresses } = parsed.data
+      const existingConfig = normaliseSmtpConfig(existing.config)
+      const newConfig: SmtpChannelConfig = {
+        host,
+        port,
+        encryption,
+        username: username || undefined,
+        // Non-empty string replaces; empty/absent keeps existing
+        password: password || existingConfig.password,
+        fromAddress,
+        fromName: fromName || undefined,
+        toAddresses,
+      }
+      await db
+        .update(notificationChannels)
+        .set({ name, config: newConfig, updatedAt: new Date() })
+        .where(and(eq(notificationChannels.id, channelId), eq(notificationChannels.organisationId, orgId)))
+    }
+    return { success: true }
+  } catch {
+    return { error: 'Failed to update notification channel' }
+  }
+}
+
+export async function sendTestNotification(
+  orgId: string,
+  channelId: string,
+): Promise<{ success: true } | { error: string }> {
+  const existing = await db.query.notificationChannels.findFirst({
+    where: and(
+      eq(notificationChannels.id, channelId),
+      eq(notificationChannels.organisationId, orgId),
+      isNull(notificationChannels.deletedAt),
+    ),
+  })
+  if (!existing) return { error: 'Notification channel not found' }
+
+  if (existing.type === 'webhook') {
+    const cfg = existing.config as WebhookChannelConfig
+    const payload = JSON.stringify({
+      event: 'alert.test',
+      severity: 'info',
+      host: 'test-host',
+      rule: 'Test Notification',
+      message: 'This is a test notification from Infrawatch.',
+      timestamp: new Date().toISOString(),
+    })
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'User-Agent': 'Infrawatch/1.0',
+    }
+
+    if (cfg.secret) {
+      const sig = createHmac('sha256', cfg.secret).update(payload).digest('hex')
+      headers['X-Infrawatch-Signature'] = `sha256=${sig}`
+    }
+
+    try {
+      const res = await fetch(cfg.url, {
+        method: 'POST',
+        headers,
+        body: payload,
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (!res.ok) {
+        return { error: `Webhook returned ${res.status} ${res.statusText}` }
+      }
+      return { success: true }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'Request failed' }
+    }
+  } else {
+    const cfg = normaliseSmtpConfig(existing.config)
+    const transporter = nodemailer.createTransport({
+      host: cfg.host,
+      port: cfg.port,
+      secure: cfg.encryption === 'tls',
+      requireTLS: cfg.encryption === 'starttls',
+      auth: cfg.username ? { user: cfg.username, pass: cfg.password ?? '' } : undefined,
+    })
+
+    try {
+      await transporter.sendMail({
+        from: cfg.fromName ? `"${cfg.fromName}" <${cfg.fromAddress}>` : cfg.fromAddress,
+        to: cfg.toAddresses.join(', '),
+        subject: 'Infrawatch Test Notification',
+        text: 'This is a test notification from Infrawatch. Your SMTP channel is configured correctly.',
+        html: '<p>This is a test notification from <strong>Infrawatch</strong>. Your SMTP channel is configured correctly.</p>',
+      })
+      return { success: true }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : 'Failed to send email' }
+    }
+  }
+}
+
+// ─── Alert Silences ───────────────────────────────────────────────────────────
+
+export type AlertSilenceWithHost = AlertSilence & { hostname: string | null }
+
+const createSilenceSchema = z.object({
+  hostId: z.string().min(1).nullable().optional(),
+  ruleId: z.string().min(1).nullable().optional(),
+  reason: z.string().min(1).max(255),
+  startsAt: z.string().datetime(),
+  endsAt: z.string().datetime(),
+}).refine((d) => new Date(d.endsAt) > new Date(d.startsAt), {
+  message: 'End time must be after start time',
+  path: ['endsAt'],
+})
+
+export async function getSilences(orgId: string): Promise<AlertSilenceWithHost[]> {
+  const rows = await db
+    .select({
+      id: alertSilences.id,
+      organisationId: alertSilences.organisationId,
+      hostId: alertSilences.hostId,
+      ruleId: alertSilences.ruleId,
+      reason: alertSilences.reason,
+      startsAt: alertSilences.startsAt,
+      endsAt: alertSilences.endsAt,
+      createdBy: alertSilences.createdBy,
+      createdAt: alertSilences.createdAt,
+      updatedAt: alertSilences.updatedAt,
+      deletedAt: alertSilences.deletedAt,
+      metadata: alertSilences.metadata,
+      hostname: hosts.hostname,
+    })
+    .from(alertSilences)
+    .leftJoin(hosts, eq(alertSilences.hostId, hosts.id))
+    .where(
+      and(
+        eq(alertSilences.organisationId, orgId),
+        isNull(alertSilences.deletedAt),
+      ),
+    )
+    .orderBy(desc(alertSilences.startsAt))
+
+  return rows
+}
+
+export async function getActiveSilencesForHost(
+  orgId: string,
+  hostId: string,
+): Promise<AlertSilence[]> {
+  const now = new Date()
+  return db.query.alertSilences.findMany({
+    where: and(
+      eq(alertSilences.organisationId, orgId),
+      isNull(alertSilences.deletedAt),
+      lte(alertSilences.startsAt, now),
+      gte(alertSilences.endsAt, now),
+      // match host-specific silences for this host, or org-wide silences (hostId IS NULL)
+      // We use a raw SQL OR here via the Drizzle `or` helper imported above
+      sql`(${alertSilences.hostId} = ${hostId} OR ${alertSilences.hostId} IS NULL)`,
+    ),
+  })
+}
+
+export async function createSilence(
+  orgId: string,
+  userId: string,
+  input: unknown,
+): Promise<{ success: true; id: string } | { error: string }> {
+  const parsed = createSilenceSchema.safeParse(input)
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'Invalid input' }
+  }
+  const data = parsed.data
+
+  try {
+    const [row] = await db
+      .insert(alertSilences)
+      .values({
+        organisationId: orgId,
+        hostId: data.hostId ?? null,
+        ruleId: data.ruleId ?? null,
+        reason: data.reason,
+        startsAt: new Date(data.startsAt),
+        endsAt: new Date(data.endsAt),
+        createdBy: userId,
+      })
+      .returning({ id: alertSilences.id })
+
+    if (!row) return { error: 'Insert failed' }
+    return { success: true, id: row.id }
+  } catch {
+    return { error: 'Failed to create silence' }
+  }
+}
+
+export async function deleteSilence(
+  orgId: string,
+  silenceId: string,
+): Promise<{ success: true } | { error: string }> {
+  const existing = await db.query.alertSilences.findFirst({
+    where: and(
+      eq(alertSilences.id, silenceId),
+      eq(alertSilences.organisationId, orgId),
+      isNull(alertSilences.deletedAt),
+    ),
+  })
+  if (!existing) return { error: 'Silence not found' }
+
+  await db
+    .update(alertSilences)
+    .set({ deletedAt: new Date() })
+    .where(and(eq(alertSilences.id, silenceId), eq(alertSilences.organisationId, orgId)))
 
   return { success: true }
 }

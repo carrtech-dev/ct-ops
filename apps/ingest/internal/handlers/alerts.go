@@ -32,10 +32,16 @@ type metricThresholdConfig struct {
 	Threshold float64 `json:"threshold"` // 0–100
 }
 
-// webhookChannelConfig matches the JSONB stored in notification_channels.config.
+// webhookChannelConfig matches the JSONB stored in notification_channels.config for webhook channels.
 type webhookChannelConfig struct {
 	URL    string `json:"url"`
 	Secret string `json:"secret"`
+}
+
+// notifChannels bundles all notification channel types for a single dispatch call.
+type notifChannels struct {
+	webhooks []queries.WebhookChannelRow
+	smtp     []queries.SmtpChannelRow
 }
 
 // evaluateAlerts is called after check results are persisted for a heartbeat.
@@ -47,6 +53,15 @@ func evaluateAlerts(
 	checkStatuses map[string]string,
 	metrics heartbeatMetrics,
 ) {
+	// Skip evaluation entirely if the host is currently silenced.
+	silenced, err := queries.IsHostSilenced(ctx, pool, orgID, hostID)
+	if err != nil {
+		slog.Warn("evaluateAlerts: checking silence", "host_id", hostID, "err", err)
+	} else if silenced {
+		slog.Debug("evaluateAlerts: host silenced, skipping", "host_id", hostID)
+		return
+	}
+
 	rules, err := queries.GetAlertRulesForHost(ctx, pool, orgID, hostID)
 	if err != nil {
 		slog.Warn("evaluateAlerts: fetching rules", "host_id", hostID, "err", err)
@@ -56,10 +71,20 @@ func evaluateAlerts(
 		return
 	}
 
-	channels, err := queries.GetEnabledWebhookChannels(ctx, pool, orgID)
+	var channels notifChannels
+
+	webhooks, err := queries.GetEnabledWebhookChannels(ctx, pool, orgID)
 	if err != nil {
-		// Non-fatal: alerts still fire; notifications are best-effort.
 		slog.Warn("evaluateAlerts: fetching webhook channels", "org_id", orgID, "err", err)
+	} else {
+		channels.webhooks = webhooks
+	}
+
+	smtpChs, err := queries.GetEnabledSmtpChannels(ctx, pool, orgID)
+	if err != nil {
+		slog.Warn("evaluateAlerts: fetching smtp channels", "org_id", orgID, "err", err)
+	} else {
+		channels.smtp = smtpChs
 	}
 
 	for _, rule := range rules {
@@ -78,7 +103,7 @@ func evaluateCheckStatusRule(
 	rule queries.AlertRuleRow,
 	hostID, hostname string,
 	checkStatuses map[string]string,
-	channels []queries.WebhookChannelRow,
+	channels notifChannels,
 ) {
 	var cfg checkStatusConfig
 	if err := json.Unmarshal([]byte(rule.ConfigJSON), &cfg); err != nil {
@@ -125,14 +150,16 @@ func evaluateCheckStatusRule(
 			return
 		}
 		slog.Info("alert fired", "instance_id", id, "rule", rule.Name, "host", hostname)
-		dispatchWebhooks(ctx, channels, AlertEvent{
+		ev := AlertEvent{
 			Event:     "alert.fired",
 			Severity:  rule.Severity,
 			Host:      hostname,
 			Rule:      rule.Name,
 			Message:   message,
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
-		})
+		}
+		dispatchWebhooks(ctx, channels.webhooks, ev)
+		dispatchSmtp(channels.smtp, ev)
 		return
 	}
 
@@ -143,14 +170,16 @@ func evaluateCheckStatusRule(
 			return
 		}
 		slog.Info("alert resolved", "instance_id", existing.ID, "rule", rule.Name, "host", hostname)
-		dispatchWebhooks(ctx, channels, AlertEvent{
+		ev := AlertEvent{
 			Event:     "alert.resolved",
 			Severity:  rule.Severity,
 			Host:      hostname,
 			Rule:      rule.Name,
 			Message:   fmt.Sprintf("Check recovered on host %s", hostname),
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
-		})
+		}
+		dispatchWebhooks(ctx, channels.webhooks, ev)
+		dispatchSmtp(channels.smtp, ev)
 	}
 }
 
@@ -160,7 +189,7 @@ func evaluateMetricThresholdRule(
 	rule queries.AlertRuleRow,
 	hostID, hostname string,
 	metrics heartbeatMetrics,
-	channels []queries.WebhookChannelRow,
+	channels notifChannels,
 ) {
 	var cfg metricThresholdConfig
 	if err := json.Unmarshal([]byte(rule.ConfigJSON), &cfg); err != nil {
@@ -202,14 +231,16 @@ func evaluateMetricThresholdRule(
 			return
 		}
 		slog.Info("alert fired", "instance_id", id, "rule", rule.Name, "host", hostname)
-		dispatchWebhooks(ctx, channels, AlertEvent{
+		ev := AlertEvent{
 			Event:     "alert.fired",
 			Severity:  rule.Severity,
 			Host:      hostname,
 			Rule:      rule.Name,
 			Message:   message,
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
-		})
+		}
+		dispatchWebhooks(ctx, channels.webhooks, ev)
+		dispatchSmtp(channels.smtp, ev)
 		return
 	}
 
@@ -219,14 +250,16 @@ func evaluateMetricThresholdRule(
 			return
 		}
 		slog.Info("alert resolved", "instance_id", existing.ID, "rule", rule.Name, "host", hostname)
-		dispatchWebhooks(ctx, channels, AlertEvent{
+		ev := AlertEvent{
 			Event:     "alert.resolved",
 			Severity:  rule.Severity,
 			Host:      hostname,
 			Rule:      rule.Name,
 			Message:   fmt.Sprintf("%s recovered on host %s (current: %.1f%%)", cfg.Metric, hostname, currentValue),
 			Timestamp: time.Now().UTC().Format(time.RFC3339),
-		})
+		}
+		dispatchWebhooks(ctx, channels.webhooks, ev)
+		dispatchSmtp(channels.smtp, ev)
 	}
 }
 

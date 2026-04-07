@@ -147,6 +147,57 @@ func GetRecentCheckResults(ctx context.Context, pool *pgxpool.Pool, checkID stri
 	return result, rows.Err()
 }
 
+// SmtpChannelRow is a row from notification_channels where type = 'smtp'.
+type SmtpChannelRow struct {
+	ID         string
+	ConfigJSON string // raw JSONB as text
+}
+
+// GetEnabledSmtpChannels returns all enabled, non-deleted SMTP notification
+// channels for the given organisation.
+func GetEnabledSmtpChannels(ctx context.Context, pool *pgxpool.Pool, orgID string) ([]SmtpChannelRow, error) {
+	const q = `
+		SELECT id, config::text
+		FROM notification_channels
+		WHERE organisation_id = $1
+		  AND type = 'smtp'
+		  AND enabled = true
+		  AND deleted_at IS NULL
+	`
+	rows, err := pool.Query(ctx, q, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []SmtpChannelRow
+	for rows.Next() {
+		var r SmtpChannelRow
+		if err := rows.Scan(&r.ID, &r.ConfigJSON); err != nil {
+			return nil, err
+		}
+		result = append(result, r)
+	}
+	return result, rows.Err()
+}
+
+// IsHostSilenced returns true if the given host (or the whole org) currently has
+// an active silence window covering now.
+func IsHostSilenced(ctx context.Context, pool *pgxpool.Pool, orgID, hostID string) (bool, error) {
+	const q = `
+		SELECT COUNT(*) > 0
+		FROM alert_silences
+		WHERE organisation_id = $1
+		  AND deleted_at IS NULL
+		  AND starts_at <= NOW()
+		  AND ends_at   >= NOW()
+		  AND (host_id = $2 OR host_id IS NULL)
+	`
+	var silenced bool
+	err := pool.QueryRow(ctx, q, orgID, hostID).Scan(&silenced)
+	return silenced, err
+}
+
 // GetEnabledWebhookChannels returns all enabled, non-deleted webhook notification
 // channels for the given organisation.
 func GetEnabledWebhookChannels(ctx context.Context, pool *pgxpool.Pool, orgID string) ([]WebhookChannelRow, error) {

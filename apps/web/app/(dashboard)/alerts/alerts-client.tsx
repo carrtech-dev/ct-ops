@@ -1,16 +1,21 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow, format } from 'date-fns'
 import {
   Bell,
   BellOff,
   CheckCircle2,
+  FlaskConical,
+  Loader2,
   Mail,
+  Pencil,
   Plus,
   Trash2,
+  VolumeX,
   Webhook,
+  XCircle,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useForm } from 'react-hook-form'
@@ -49,9 +54,15 @@ import {
   getNotificationChannels,
   createNotificationChannel,
   deleteNotificationChannel,
+  updateNotificationChannel,
+  sendTestNotification,
+  getSilences,
+  createSilence,
+  deleteSilence,
 } from '@/lib/actions/alerts'
-import type { AlertInstanceWithRule, NotificationChannelSafe } from '@/lib/actions/alerts'
+import type { AlertInstanceWithRule, NotificationChannelSafe, AlertSilenceWithHost } from '@/lib/actions/alerts'
 import type { AlertSeverity, AlertInstanceStatus } from '@/lib/db/schema'
+import type { HostWithAgent } from '@/lib/actions/agents'
 
 // ─── Severity Badge ────────────────────────────────────────────────────────────
 
@@ -202,11 +213,25 @@ function AddWebhookDialog({
 
 // ─── SMTP Dialog ──────────────────────────────────────────────────────────────
 
+type SmtpEncryptionValue = 'none' | 'starttls' | 'tls'
+
+const ENCRYPTION_DEFAULTS: Record<SmtpEncryptionValue, number> = {
+  none: 25,
+  starttls: 587,
+  tls: 465,
+}
+
+const ENCRYPTION_LABELS: Record<SmtpEncryptionValue, { label: string; description: string }> = {
+  none:     { label: 'None',     description: 'Unencrypted — not recommended' },
+  starttls: { label: 'STARTTLS', description: 'Plain connect, upgrades to TLS (port 587)' },
+  tls:      { label: 'SSL/TLS',  description: 'Direct TLS connection (port 465)' },
+}
+
 const smtpFormSchema = z.object({
   name: z.string().min(1, 'Name is required').max(100),
   host: z.string().min(1, 'Host is required'),
   port: z.number().int().min(1).max(65535),
-  secure: z.boolean(),
+  encryption: z.enum(['none', 'starttls', 'tls']),
   username: z.string().optional(),
   password: z.string().optional(),
   fromAddress: z.string().email('Must be a valid email'),
@@ -215,6 +240,32 @@ const smtpFormSchema = z.object({
 })
 
 type SmtpFormValues = z.infer<typeof smtpFormSchema>
+
+function SmtpEncryptionSelect({
+  value,
+  onChange,
+}: {
+  value: SmtpEncryptionValue
+  onChange: (v: SmtpEncryptionValue) => void
+}) {
+  return (
+    <Select value={value} onValueChange={(v) => onChange(v as SmtpEncryptionValue)}>
+      <SelectTrigger>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {(Object.entries(ENCRYPTION_LABELS) as [SmtpEncryptionValue, { label: string; description: string }][]).map(
+          ([key, { label, description }]) => (
+            <SelectItem key={key} value={key}>
+              <span className="font-medium">{label}</span>
+              <span className="ml-2 text-muted-foreground text-xs">{description}</span>
+            </SelectItem>
+          ),
+        )}
+      </SelectContent>
+    </Select>
+  )
+}
 
 function AddSmtpDialog({
   orgId,
@@ -236,10 +287,15 @@ function AddSmtpDialog({
     formState: { errors, isSubmitting },
   } = useForm<SmtpFormValues>({
     resolver: zodResolver(smtpFormSchema),
-    defaultValues: { port: 587, secure: false },
+    defaultValues: { port: 587, encryption: 'starttls' },
   })
 
-  const secure = watch('secure')
+  const encryption = watch('encryption') as SmtpEncryptionValue
+
+  function handleEncryptionChange(v: SmtpEncryptionValue) {
+    setValue('encryption', v)
+    setValue('port', ENCRYPTION_DEFAULTS[v])
+  }
 
   async function onSubmit(values: SmtpFormValues) {
     const toAddresses = values.toAddresses
@@ -253,7 +309,7 @@ function AddSmtpDialog({
       config: {
         host: values.host,
         port: values.port,
-        secure: values.secure,
+        encryption: values.encryption,
         username: values.username || undefined,
         password: values.password || undefined,
         fromAddress: values.fromAddress,
@@ -287,21 +343,13 @@ function AddSmtpDialog({
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="smtp-port">Port</Label>
-              <Input id="smtp-port" type="number" placeholder="587" {...register('port', { valueAsNumber: true })} />
+              <Input id="smtp-port" type="number" {...register('port', { valueAsNumber: true })} />
               {errors.port && <p className="text-sm text-red-600">{errors.port.message}</p>}
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <input
-              id="smtp-secure"
-              type="checkbox"
-              className="h-4 w-4 rounded border-input"
-              checked={secure}
-              onChange={(e) => setValue('secure', e.target.checked)}
-            />
-            <Label htmlFor="smtp-secure" className="font-normal cursor-pointer">
-              Use TLS/SSL
-            </Label>
+          <div className="space-y-1.5">
+            <Label>Encryption</Label>
+            <SmtpEncryptionSelect value={encryption} onChange={handleEncryptionChange} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
@@ -354,6 +402,443 @@ function AddSmtpDialog({
   )
 }
 
+// ─── Test Log Dialog ───────────────────────────────────────────────────────────
+
+interface TestLogEntry {
+  channelName: string
+  channelType: 'webhook' | 'smtp'
+  ok: boolean
+  message: string
+  at: Date
+}
+
+function TestLogDialog({
+  entry,
+  onClose,
+}: {
+  entry: TestLogEntry
+  onClose: () => void
+}) {
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose() }}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            {entry.channelType === 'smtp' ? (
+              <Mail className="size-4 text-muted-foreground" />
+            ) : (
+              <Webhook className="size-4 text-muted-foreground" />
+            )}
+            Test Notification — {entry.channelName}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div
+            className={`flex items-start gap-3 rounded-md border p-3 ${
+              entry.ok
+                ? 'border-green-200 bg-green-50 text-green-800'
+                : 'border-red-200 bg-red-50 text-red-800'
+            }`}
+          >
+            {entry.ok ? (
+              <CheckCircle2 className="size-4 mt-0.5 shrink-0 text-green-600" />
+            ) : (
+              <XCircle className="size-4 mt-0.5 shrink-0 text-red-600" />
+            )}
+            <div className="space-y-1 min-w-0">
+              <p className="text-sm font-medium">
+                {entry.ok ? 'Test notification sent successfully' : 'Test notification failed'}
+              </p>
+              {!entry.ok && (
+                <p className="text-sm font-mono break-all">{entry.message}</p>
+              )}
+            </div>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Sent at {entry.at.toLocaleTimeString()} on {entry.at.toLocaleDateString()}
+          </p>
+        </div>
+        <DialogFooter>
+          <Button onClick={onClose}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ─── Edit Webhook Dialog ───────────────────────────────────────────────────────
+
+const editWebhookFormSchema = z.object({
+  name: z.string().min(1, 'Name is required').max(100),
+  url: z.string().url('Must be a valid URL'),
+  secret: z.string().optional(),
+})
+
+type EditWebhookFormValues = z.infer<typeof editWebhookFormSchema>
+
+function EditWebhookDialog({
+  orgId,
+  channel,
+  open,
+  onOpenChange,
+  onSuccess,
+}: {
+  orgId: string
+  channel: NotificationChannelSafe & { type: 'webhook' }
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  onSuccess: () => void
+}) {
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm<EditWebhookFormValues>({ resolver: zodResolver(editWebhookFormSchema) })
+
+  useEffect(() => {
+    if (open) reset({ name: channel.name, url: channel.config.url, secret: '' })
+  }, [open, channel, reset])
+
+  async function onSubmit(values: EditWebhookFormValues) {
+    const result = await updateNotificationChannel(orgId, channel.id, {
+      name: values.name,
+      url: values.url,
+      secret: values.secret || undefined,
+    })
+    if ('error' in result) return
+    onSuccess()
+    onOpenChange(false)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit Webhook Channel</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-webhook-name">Name</Label>
+            <Input id="edit-webhook-name" defaultValue={channel.name} {...register('name')} />
+            {errors.name && <p className="text-sm text-red-600">{errors.name.message}</p>}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-webhook-url">URL</Label>
+            <Input id="edit-webhook-url" type="url" defaultValue={channel.config.url} {...register('url')} />
+            {errors.url && <p className="text-sm text-red-600">{errors.url.message}</p>}
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-webhook-secret">
+              Secret{' '}
+              <span className="text-muted-foreground font-normal">
+                ({channel.config.hasSecret ? 'leave blank to keep existing' : 'optional'})
+              </span>
+            </Label>
+            <Input
+              id="edit-webhook-secret"
+              placeholder={channel.config.hasSecret ? '••••••••' : 'Used for HMAC-SHA256 signature'}
+              type="password"
+              {...register('secret')}
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isSubmitting}>
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ─── Edit SMTP Dialog ──────────────────────────────────────────────────────────
+
+const editSmtpFormSchema = z.object({
+  name: z.string().min(1, 'Name is required').max(100),
+  host: z.string().min(1, 'Host is required'),
+  port: z.number().int().min(1).max(65535),
+  encryption: z.enum(['none', 'starttls', 'tls']),
+  username: z.string().optional(),
+  password: z.string().optional(),
+  fromAddress: z.string().email('Must be a valid email'),
+  fromName: z.string().optional(),
+  toAddresses: z.string().min(1, 'At least one recipient required'),
+})
+
+type EditSmtpFormValues = z.infer<typeof editSmtpFormSchema>
+
+function EditSmtpDialog({
+  orgId,
+  channel,
+  open,
+  onOpenChange,
+  onSuccess,
+}: {
+  orgId: string
+  channel: NotificationChannelSafe & { type: 'smtp' }
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  onSuccess: () => void
+}) {
+  const {
+    register,
+    handleSubmit,
+    watch,
+    setValue,
+    formState: { errors, isSubmitting },
+  } = useForm<EditSmtpFormValues>({
+    resolver: zodResolver(editSmtpFormSchema),
+    defaultValues: {
+      name: channel.name,
+      host: channel.config.host,
+      port: channel.config.port,
+      encryption: channel.config.encryption,
+      username: channel.config.username ?? '',
+      password: '',
+      fromAddress: channel.config.fromAddress,
+      fromName: channel.config.fromName ?? '',
+      toAddresses: channel.config.toAddresses.join(', '),
+    },
+  })
+
+  const encryption = watch('encryption') as SmtpEncryptionValue
+
+  function handleEncryptionChange(v: SmtpEncryptionValue) {
+    setValue('encryption', v)
+    setValue('port', ENCRYPTION_DEFAULTS[v])
+  }
+
+  async function onSubmit(values: EditSmtpFormValues) {
+    const toAddresses = values.toAddresses
+      .split(',')
+      .map((e) => e.trim())
+      .filter(Boolean)
+
+    const result = await updateNotificationChannel(orgId, channel.id, {
+      name: values.name,
+      host: values.host,
+      port: values.port,
+      encryption: values.encryption,
+      username: values.username || undefined,
+      password: values.password || undefined,
+      fromAddress: values.fromAddress,
+      fromName: values.fromName || undefined,
+      toAddresses,
+    })
+    if ('error' in result) return
+    onSuccess()
+    onOpenChange(false)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Edit SMTP Channel</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-smtp-name">Name</Label>
+            <Input id="edit-smtp-name" {...register('name')} />
+            {errors.name && <p className="text-sm text-red-600">{errors.name.message}</p>}
+          </div>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="col-span-2 space-y-1.5">
+              <Label htmlFor="edit-smtp-host">Host</Label>
+              <Input id="edit-smtp-host" {...register('host')} />
+              {errors.host && <p className="text-sm text-red-600">{errors.host.message}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-smtp-port">Port</Label>
+              <Input id="edit-smtp-port" type="number" {...register('port', { valueAsNumber: true })} />
+              {errors.port && <p className="text-sm text-red-600">{errors.port.message}</p>}
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label>Encryption</Label>
+            <SmtpEncryptionSelect value={encryption} onChange={handleEncryptionChange} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-smtp-username">
+                Username <span className="text-muted-foreground font-normal">(optional)</span>
+              </Label>
+              <Input id="edit-smtp-username" {...register('username')} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-smtp-password">
+                Password{' '}
+                <span className="text-muted-foreground font-normal">
+                  ({channel.config.hasPassword ? 'leave blank to keep existing' : 'optional'})
+                </span>
+              </Label>
+              <Input
+                id="edit-smtp-password"
+                type="password"
+                placeholder={channel.config.hasPassword ? '••••••••' : ''}
+                {...register('password')}
+              />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-smtp-from">From address</Label>
+              <Input id="edit-smtp-from" {...register('fromAddress')} />
+              {errors.fromAddress && <p className="text-sm text-red-600">{errors.fromAddress.message}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-smtp-fromname">
+                From name <span className="text-muted-foreground font-normal">(optional)</span>
+              </Label>
+              <Input id="edit-smtp-fromname" {...register('fromName')} />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-smtp-to">Recipients</Label>
+            <Input id="edit-smtp-to" {...register('toAddresses')} />
+            <p className="text-xs text-muted-foreground">Comma-separated list of email addresses</p>
+            {errors.toAddresses && <p className="text-sm text-red-600">{errors.toAddresses.message}</p>}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isSubmitting}>
+              Save Changes
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// ─── Add Silence Dialog ────────────────────────────────────────────────────────
+
+function toLocalDatetimeValue(d: Date): string {
+  // Returns a string suitable for <input type="datetime-local"> in local time
+  const offset = d.getTimezoneOffset() * 60_000
+  return new Date(d.getTime() - offset).toISOString().slice(0, 16)
+}
+
+const silenceFormSchema = z.object({
+  hostId: z.string().optional(),
+  reason: z.string().min(1, 'Reason is required').max(255),
+  startsAt: z.string().min(1, 'Start time is required'),
+  endsAt: z.string().min(1, 'End time is required'),
+})
+
+type SilenceFormValues = z.infer<typeof silenceFormSchema>
+
+function AddSilenceDialog({
+  orgId,
+  userId,
+  hosts,
+  open,
+  onOpenChange,
+  onSuccess,
+  prefilledHostId,
+}: {
+  orgId: string
+  userId: string
+  hosts: HostWithAgent[]
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  onSuccess: () => void
+  prefilledHostId?: string
+}) {
+  const now = new Date()
+  const inOneHour = new Date(now.getTime() + 60 * 60 * 1000)
+
+  const {
+    register,
+    handleSubmit,
+    reset,
+    formState: { errors, isSubmitting },
+  } = useForm<SilenceFormValues>({
+    resolver: zodResolver(silenceFormSchema),
+    defaultValues: {
+      hostId: prefilledHostId ?? '',
+      startsAt: toLocalDatetimeValue(now),
+      endsAt: toLocalDatetimeValue(inOneHour),
+    },
+  })
+
+  async function onSubmit(values: SilenceFormValues) {
+    const result = await createSilence(orgId, userId, {
+      hostId: values.hostId || null,
+      reason: values.reason,
+      startsAt: new Date(values.startsAt).toISOString(),
+      endsAt: new Date(values.endsAt).toISOString(),
+    })
+    if ('error' in result) return
+    reset()
+    onSuccess()
+    onOpenChange(false)
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Create Silence</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="silence-host">Host <span className="text-muted-foreground font-normal">(leave blank for org-wide)</span></Label>
+            <select
+              id="silence-host"
+              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              {...register('hostId')}
+            >
+              <option value="">All hosts (org-wide)</option>
+              {hosts.map((h) => (
+                <option key={h.id} value={h.id}>
+                  {h.hostname}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="silence-reason">Reason</Label>
+            <Input
+              id="silence-reason"
+              placeholder="e.g. Scheduled maintenance window"
+              {...register('reason')}
+            />
+            {errors.reason && <p className="text-sm text-red-600">{errors.reason.message}</p>}
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="silence-starts">Starts at</Label>
+              <Input id="silence-starts" type="datetime-local" {...register('startsAt')} />
+              {errors.startsAt && <p className="text-sm text-red-600">{errors.startsAt.message}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="silence-ends">Ends at</Label>
+              <Input id="silence-ends" type="datetime-local" {...register('endsAt')} />
+              {errors.endsAt && <p className="text-sm text-red-600">{errors.endsAt.message}</p>}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={isSubmitting}>
+              Create Silence
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // ─── Main Component ────────────────────────────────────────────────────────────
 
 interface AlertsClientProps {
@@ -362,6 +847,8 @@ interface AlertsClientProps {
   initialActive: AlertInstanceWithRule[]
   initialRecent: AlertInstanceWithRule[]
   initialChannels: NotificationChannelSafe[]
+  initialSilences: AlertSilenceWithHost[]
+  hosts: HostWithAgent[]
 }
 
 type SeverityFilter = 'all' | AlertSeverity
@@ -372,11 +859,17 @@ export function AlertsClient({
   initialActive,
   initialRecent,
   initialChannels,
+  initialSilences,
+  hosts,
 }: AlertsClientProps) {
   const qc = useQueryClient()
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('all')
   const [addWebhookOpen, setAddWebhookOpen] = useState(false)
   const [addSmtpOpen, setAddSmtpOpen] = useState(false)
+  const [addSilenceOpen, setAddSilenceOpen] = useState(false)
+  const [editingChannel, setEditingChannel] = useState<NotificationChannelSafe | null>(null)
+  const [testingChannelId, setTestingChannelId] = useState<string | null>(null)
+  const [testLog, setTestLog] = useState<TestLogEntry | null>(null)
 
   const { data: activeAlerts = [] } = useQuery({
     queryKey: ['alerts', orgId, 'firing'],
@@ -399,6 +892,13 @@ export function AlertsClient({
     refetchInterval: 60_000,
   })
 
+  const { data: silences = [] } = useQuery({
+    queryKey: ['silences', orgId],
+    queryFn: () => getSilences(orgId),
+    initialData: initialSilences,
+    refetchInterval: 60_000,
+  })
+
   const acknowledgeMutation = useMutation({
     mutationFn: (instanceId: string) => acknowledgeAlert(orgId, instanceId, currentUserId),
     onSuccess: () => {
@@ -412,6 +912,26 @@ export function AlertsClient({
       qc.invalidateQueries({ queryKey: ['notification-channels', orgId] })
     },
   })
+
+  const deleteSilenceMutation = useMutation({
+    mutationFn: (silenceId: string) => deleteSilence(orgId, silenceId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['silences', orgId] })
+    },
+  })
+
+  async function handleTestNotification(channel: NotificationChannelSafe) {
+    setTestingChannelId(channel.id)
+    const result = await sendTestNotification(orgId, channel.id)
+    setTestingChannelId(null)
+    setTestLog({
+      channelName: channel.name,
+      channelType: channel.type,
+      ok: 'success' in result,
+      message: 'error' in result ? result.error : 'Notification delivered successfully.',
+      at: new Date(),
+    })
+  }
 
   const filteredActive = severityFilter === 'all'
     ? activeAlerts
@@ -575,6 +1095,108 @@ export function AlertsClient({
         </CardContent>
       </Card>
 
+      {/* Silences */}
+      <Card>
+        <CardHeader className="flex flex-row items-start justify-between">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <VolumeX className="size-4 text-muted-foreground" />
+              Silences
+            </CardTitle>
+            <CardDescription className="mt-1">
+              Suppress alert firing during planned maintenance windows
+            </CardDescription>
+          </div>
+          <Button
+            size="sm"
+            variant="outline"
+            className="shrink-0"
+            onClick={() => setAddSilenceOpen(true)}
+          >
+            <Plus className="size-3.5 mr-1" />
+            Add Silence
+          </Button>
+        </CardHeader>
+        <CardContent>
+          {silences.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              No silences configured
+            </p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Scope</TableHead>
+                  <TableHead>Reason</TableHead>
+                  <TableHead>Starts</TableHead>
+                  <TableHead>Ends</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {silences.map((s) => {
+                  const now = new Date()
+                  const start = new Date(s.startsAt)
+                  const end = new Date(s.endsAt)
+                  const isActive = start <= now && end >= now
+                  const isExpired = end < now
+                  return (
+                    <TableRow key={s.id}>
+                      <TableCell className="font-medium">
+                        {s.hostname ? (
+                          <Link href={`/hosts/${s.hostId}`} className="hover:underline text-foreground">
+                            {s.hostname}
+                          </Link>
+                        ) : (
+                          <span className="text-muted-foreground italic">All hosts</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground max-w-xs truncate">
+                        {s.reason}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {formatAbsolute(s.startsAt)}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {formatAbsolute(s.endsAt)}
+                      </TableCell>
+                      <TableCell>
+                        {isActive ? (
+                          <Badge className="bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-100">
+                            Active
+                          </Badge>
+                        ) : isExpired ? (
+                          <Badge className="bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-100">
+                            Expired
+                          </Badge>
+                        ) : (
+                          <Badge className="bg-blue-100 text-blue-800 border-blue-200 hover:bg-blue-100">
+                            Upcoming
+                          </Badge>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title="Remove silence"
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                          onClick={() => deleteSilenceMutation.mutate(s.id)}
+                          disabled={deleteSilenceMutation.isPending}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Notification Channels */}
       <Card>
         <CardHeader className="flex flex-row items-start justify-between">
@@ -641,22 +1263,48 @@ export function AlertsClient({
                     <TableCell className="text-sm text-muted-foreground">
                       {ch.type === 'smtp' ? (
                         <span>
-                          {ch.config.host}:{ch.config.port} → {ch.config.toAddresses.join(', ')}
+                          {ch.config.host}:{ch.config.port} ({ch.config.encryption.toUpperCase()}) → {ch.config.toAddresses.join(', ')}
                         </span>
                       ) : (
                         <span className="font-mono truncate block max-w-xs">{ch.config.url}</span>
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                        onClick={() => deleteChannelMutation.mutate(ch.id)}
-                        disabled={deleteChannelMutation.isPending}
-                      >
-                        <Trash2 className="size-3.5" />
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title="Send test notification"
+                          onClick={() => handleTestNotification(ch)}
+                          disabled={testingChannelId === ch.id}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          {testingChannelId === ch.id ? (
+                            <Loader2 className="size-3.5 animate-spin" />
+                          ) : (
+                            <FlaskConical className="size-3.5" />
+                          )}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title="Edit channel"
+                          onClick={() => setEditingChannel(ch)}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          <Pencil className="size-3.5" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          title="Delete channel"
+                          className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                          onClick={() => deleteChannelMutation.mutate(ch.id)}
+                          disabled={deleteChannelMutation.isPending}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -666,6 +1314,14 @@ export function AlertsClient({
         </CardContent>
       </Card>
 
+      <AddSilenceDialog
+        orgId={orgId}
+        userId={currentUserId}
+        hosts={hosts}
+        open={addSilenceOpen}
+        onOpenChange={setAddSilenceOpen}
+        onSuccess={() => qc.invalidateQueries({ queryKey: ['silences', orgId] })}
+      />
       <AddWebhookDialog
         orgId={orgId}
         open={addWebhookOpen}
@@ -678,6 +1334,33 @@ export function AlertsClient({
         onOpenChange={setAddSmtpOpen}
         onSuccess={() => qc.invalidateQueries({ queryKey: ['notification-channels', orgId] })}
       />
+      {testLog && (
+        <TestLogDialog entry={testLog} onClose={() => setTestLog(null)} />
+      )}
+      {editingChannel?.type === 'webhook' && (
+        <EditWebhookDialog
+          orgId={orgId}
+          channel={editingChannel}
+          open={true}
+          onOpenChange={(v) => { if (!v) setEditingChannel(null) }}
+          onSuccess={() => {
+            setEditingChannel(null)
+            qc.invalidateQueries({ queryKey: ['notification-channels', orgId] })
+          }}
+        />
+      )}
+      {editingChannel?.type === 'smtp' && (
+        <EditSmtpDialog
+          orgId={orgId}
+          channel={editingChannel}
+          open={true}
+          onOpenChange={(v) => { if (!v) setEditingChannel(null) }}
+          onSuccess={() => {
+            setEditingChannel(null)
+            qc.invalidateQueries({ queryKey: ['notification-channels', orgId] })
+          }}
+        />
+      )}
     </div>
   )
 }

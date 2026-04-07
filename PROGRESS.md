@@ -9,11 +9,67 @@
 **Phase 2 — Monitoring & Alerting**
 
 ## Current Status
-🟡 Phase 2 in progress — Full alert pipeline built with multi-channel notifications (webhook + SMTP email). Ingest evaluates rules on every heartbeat, fires/resolves instances. Alert rules support `check_status` and `metric_threshold`. Web UI has a live Alerts page, per-host Alerts tab, alert count badge in inventory, and a Global Alert Defaults settings page that auto-applies configured rules to every newly-approved host. Agent HTTP check resource leak fixed; stream dedup map reset on reconnect. mTLS and Redpanda deferred.
+🟡 Phase 2 in progress — Full alert pipeline built with multi-channel notifications (webhook + SMTP email). Notification channels now support test delivery with a result log dialog, in-place editing, and a three-way encryption selector (none/STARTTLS/SSL-TLS). SMTP dispatch is now wired into the Go ingest service — previously only webhooks were dispatched. Ingest evaluates rules on every heartbeat, fires/resolves instances. Alert rules support `check_status` and `metric_threshold`. Web UI has a live Alerts page, per-host Alerts tab, alert count badge in inventory, and a Global Alert Defaults settings page that auto-applies configured rules to every newly-approved host. mTLS and Redpanda deferred.
 
 ---
 
 ## What Has Been Built
+
+### Session 13 — Alert silencing + migration runner root-cause fix
+
+**Alert silencing feature** (`apps/web/lib/db/schema/alerts.ts`, `apps/web/lib/actions/alerts.ts`, `apps/web/app/(dashboard)/alerts/alerts-client.tsx`, `apps/web/app/(dashboard)/hosts/[id]/alerts-tab.tsx`, `apps/ingest/internal/db/queries/alerts.sql.go`, `apps/ingest/internal/handlers/alerts.go`)
+- New `alert_silences` table — host-scoped or org-wide time windows that suppress alert evaluation; migration `0010_eager_chameleon.sql` generated via `db:generate`
+- Server actions: `getSilences`, `getActiveSilencesForHost`, `createSilence`, `deleteSilence`
+- Go ingest: `IsHostSilenced` query short-circuits `evaluateAlerts` so silenced hosts skip rule evaluation entirely
+- UI: dedicated Silences card on `/alerts` page with Active/Upcoming/Expired badges + add dialog; per-host "Silence Host" button and amber active-silence banner with one-click remove on the host detail Alerts tab
+
+**Migration runner root-cause fix** (`apps/web/lib/db/migrations/meta/_journal.json`, `apps/web/lib/db/migrations/0009_global_alert_defaults.sql`, `apps/web/Dockerfile`, `start.sh`)
+- Recurring "migrations not applied" symptom traced to `_journal.json`: drizzle-orm's migrator decides pending migrations by comparing each entry's `when` timestamp against `MAX(created_at)` in `__drizzle_migrations`. Migration 0008 had been hand-crafted with `when: 1775900000000` (artificially in the future), so 0009 and 0010 — with smaller `when` values — were silently classified as already applied and skipped with no error.
+- Fix: bumped 0009 → `1775900000001` and 0010 → `1775900000002` so timestamps are strictly monotonic
+- 0009 SQL rewritten with `IF NOT EXISTS` guards because its column had been applied to live DBs without being tracked
+- Dockerfile: migration SQL files now copied directly from build context (`COPY --chown=nextjs:nodejs apps/web/lib/db/migrations …`) so the layer is always invalidated when migrations change, regardless of builder-stage cache hits
+- `start.sh`: explicit `DOCKER_DB_URL` constant and fail-fast on `pnpm db:migrate` failure so silent skips can never happen again
+- **Going forward:** never hand-craft migration files or `_journal.json` entries — always `pnpm run db:generate` so `when` is `Date.now()` and remains monotonic
+
+**Build state**
+- `pnpm run build` — zero TypeScript errors ✅
+- `go build ./apps/ingest/...` — compiles ✅
+- `alert_silences` table verified present; `__drizzle_migrations` has all 11 rows
+
+### Session 12 — Notification channel test, edit, and SMTP dispatch fix
+
+**Test notification button** (`apps/web/app/(dashboard)/alerts/alerts-client.tsx`, `apps/web/lib/actions/alerts.ts`)
+- Flask icon button per channel row; sends a real test payload and shows a `TestLogDialog` with success confirmation or the exact error string (e.g. SMTP auth failure, HTTP 401, TLS version mismatch)
+- Webhook test: POSTs `alert.test` JSON payload with HMAC-SHA256 signature when a secret is set; 10 s timeout
+- SMTP test: sends via nodemailer using the stored channel config; nodemailer installed as a new web dependency
+- Button shows `Loader2` spinner while in flight; result dialog stays open until dismissed
+
+**Edit notification channel** (`apps/web/app/(dashboard)/alerts/alerts-client.tsx`, `apps/web/lib/actions/alerts.ts`)
+- Pencil icon button opens type-specific edit dialog (`EditWebhookDialog` / `EditSmtpDialog`) pre-filled from the safe config
+- Secret/password fields labelled "leave blank to keep existing" when a value is already stored; empty submission preserves the existing credential
+- `updateNotificationChannel` server action merges with the existing DB row so secrets are never lost
+
+**SMTP encryption field** (`apps/web/lib/db/schema/alerts.ts`, `apps/web/lib/actions/alerts.ts`, `apps/web/app/(dashboard)/alerts/alerts-client.tsx`)
+- `SmtpChannelConfig.secure: boolean` replaced with `encryption: 'none' | 'starttls' | 'tls'`; new `SmtpEncryption` type exported from schema
+- Zod schemas and `NotificationChannelSafe` type updated throughout
+- `normaliseSmtpConfig()` backward-compat function converts legacy `secure: bool` rows on read (`true → 'tls'`, `false → 'starttls'`) — no migration needed (JSONB)
+- `sendTestNotification` maps encryption to nodemailer: `tls → secure: true`, `starttls → requireTLS: true`, `none → plain`
+- UI: checkbox replaced with labelled `SmtpEncryptionSelect` (three options with descriptions); selecting a mode auto-fills the conventional port (465/587/25)
+- Channel details column now shows encryption mode: e.g. `smtp.eu.mailgun.org:587 (STARTTLS) → ...`
+
+**SMTP alert dispatch — Go ingest service** (`apps/ingest/internal/db/queries/alerts.sql.go`, `apps/ingest/internal/handlers/alerts.go`, `apps/ingest/internal/handlers/notify.go`)
+- `SmtpChannelRow` struct and `GetEnabledSmtpChannels` query added — previously absent; SMTP channels were silently never fetched
+- `smtpChannelConfig` struct with `effectiveEncryption()` handles both new `encryption` field and legacy `secure: bool`
+- `sendSmtpEmail`: implements all three modes — `tls` (direct TLS via `crypto/tls` + `smtp.NewClient`), `starttls` (`smtp.Dial` + `StartTLS`), `none` (`smtp.SendMail`); `smtpSend` helper for MAIL/RCPT/DATA sequence
+- `dispatchSmtp` fans out to all SMTP channels in goroutines, logging failures (best-effort, same pattern as webhooks)
+- `notifChannels` struct bundles `webhooks` and `smtp` slices; `evaluateCheckStatusRule` and `evaluateMetricThresholdRule` updated to accept and dispatch to both
+- All four fire/resolve points in both rule evaluators now call both `dispatchWebhooks` and `dispatchSmtp`
+
+**Build state**
+- `pnpm run build` — zero TypeScript errors ✅
+- `go build ./apps/ingest/...` — compiles ✅
+
+---
 
 ### Session 11 — Agent HTTP client fix and stream dedup reset
 
