@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Load .env so values like AGENT_DOWNLOAD_BASE_URL, GITHUB_REPO_OWNER etc.
+# are available both to this script and (via export) to the docker compose
+# variable substitution that follows. docker compose also reads .env on its
+# own, but we need these in the bash environment too because start.sh
+# inspects them and prints warnings.
+if [ -f ".env" ]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
 # Generate dev TLS certificates for the ingest service if they don't exist
 CERT_DIR="./deploy/dev-tls"
 if [ ! -f "$CERT_DIR/server.crt" ] || [ ! -f "$CERT_DIR/server.key" ]; then
