@@ -6,14 +6,91 @@
 ---
 
 ## Current Phase
-**Phase 1 — Agent & Host Inventory**
+**Phase 2 — Monitoring & Alerting**
 
 ## Current Status
-🟡 Phase 1 in progress — Full agent → ingest → web pipeline working end-to-end with metric history, check definitions, and ad-hoc server queries. Agent distributes as a single binary with one-command install (curl | sh), self-updates via ingest-signalled version checks, and runs as a systemd/launchd/SCM service. Agent collects real system metrics and runs configured checks (port/process/http), streaming results via gRPC heartbeat. Ingest persists metrics and check results to TimescaleDB hypertables. Web UI shows live data via SSE, historical graphs, a Checks tab for managing check definitions, and a "Query server" button that does live port/service discovery. mTLS and Redpanda deferred.
+🟡 Phase 2 in progress — Full alert pipeline built: ingest evaluates alert rules on every heartbeat, fires/resolves instances, and POSTs to webhook channels. Alert rules support `check_status` (consecutive failures) and `metric_threshold` (cpu/memory/disk vs threshold). Web UI has a live Alerts page (active alerts, history, acknowledge, webhook channel management), an Alerts tab on each host detail page (rule builder + active count badge), and an alert count column in the host inventory table. Auto-refresh 30 s throughout. mTLS and Redpanda deferred.
 
 ---
 
 ## What Has Been Built
+
+### Session 9 — Alert rule builder + alert state machine
+
+**Schema** (`apps/web/lib/db/schema/alerts.ts`, migration `0008_alert_rules.sql`)
+- `alertRules` table: org-scoped, hostId nullable (null = org-wide), conditionType, config JSONB, severity, enabled
+- `alertInstances` table: ruleId, hostId, orgId, status (firing/resolved/acknowledged), message, triggeredAt, resolvedAt, acknowledgedAt/By
+- `notificationChannels` table: orgId, name, type='webhook', config JSONB (url + optional secret), enabled
+
+**Ingest alert evaluation** (`apps/ingest/internal/db/queries/alerts.sql.go`, `apps/ingest/internal/handlers/alerts.go`, `apps/ingest/internal/handlers/notify.go`)
+- `GetAlertRulesForHost`, `GetActiveAlertInstance`, `InsertAlertInstance`, `ResolveAlertInstance`, `GetRecentCheckResults`, `GetEnabledWebhookChannels` — Go query functions
+- `evaluateAlerts` called from `processHeartbeat` after check results are persisted; evaluates both `check_status` and `metric_threshold` rules
+- `check_status`: fetches last N results (N = failureThreshold); fires when all failing, resolves when latest passes; guards against insufficient history
+- `metric_threshold`: compares current heartbeat metric (float32→float64 cast) against threshold; fires/resolves each heartbeat cycle
+- `notify.go`: `postWebhook` with HMAC-SHA256 signing, 5 s timeout, best-effort goroutine fan-out
+- `processHeartbeat` signature extended with `hostname string` param; both call sites updated
+
+**Server actions** (`apps/web/lib/actions/alerts.ts`)
+- `getAlertRules(orgId, hostId?)` — uses `or(eq, isNull)` for org-wide rule inclusion
+- `createAlertRule`, `updateAlertRule`, `deleteAlertRule` (soft delete), `getAlertInstances`, `acknowledgeAlert`
+- `getActiveAlertCountsForHosts(orgId, hostIds[])` — GROUP BY for inventory badge
+- `getNotificationChannels` (redacts secret → `hasSecret: boolean`), `createNotificationChannel`, `deleteNotificationChannel`
+
+**Alerts page** (`apps/web/app/(dashboard)/alerts/page.tsx`, `alerts-client.tsx`)
+- Replaced placeholder; server component fetches initial data, passes to client with `currentUserId`
+- Active alerts table: SeverityBadge, host link, rule name, message, triggered-at, Acknowledge button
+- History table: last 50 resolved/acknowledged
+- Severity filter dropdown
+- Notification channels section: webhook table + Add Webhook dialog (URL + optional secret; secret masked as `hasSecret` after save)
+
+**Host detail Alerts tab** (`apps/web/app/(dashboard)/hosts/[id]/alerts-tab.tsx`)
+- Host-specific rules section with Add Rule dialog (conditionType selector, check picker / metric config, severity)
+- Enable/disable `<Switch>` and delete per rule; org-wide rules shown read-only in separate card
+- Active alert count badge pulled via TanStack Query; shown in red if > 0
+- Host detail `page.tsx` now passes `currentUserId` to `HostDetailClient`
+- `host-detail-client.tsx`: new `'alerts'` tab with red count badge; `getAlertInstances` query for badge count
+
+**Host inventory alert badge** (`apps/web/app/(dashboard)/hosts/hosts-client.tsx`)
+- `getActiveAlertCountsForHosts` query (enabled when hosts list is non-empty)
+- New "Alerts" column: red badge if count > 0, `—` otherwise
+
+**Build state**
+- `npm run build` — zero TypeScript errors ✅
+- `go build github.com/infrawatch/ingest/...` — compiles ✅
+- `go build github.com/infrawatch/agent/...` — compiles ✅
+
+---
+
+### Session 8 — Agent version pinning, TLS install flag, and cross-platform build fixes
+
+**`--tls-skip-verify` in install flow** (`agent/cmd/agent/main.go`, `agent/internal/install/install.go`, `apps/web/app/api/agent/install/route.ts`, `apps/web/app/(dashboard)/settings/agents/agents-client.tsx`)
+- New `--tls-skip-verify` CLI flag threaded through `install.Run()` → `mergeConfig()` → `writeConfig()`, writing `tls_skip_verify = true` into `agent.toml` when set — no manual config editing required after install in self-signed cert environments
+- Install script route accepts `skip_verify=true` query param and appends the flag to the generated agent command
+- Token creation UI adds an "Accept self-signed certificates" checkbox (checked by default) that controls whether the generated curl command includes the param
+
+**Pinned required agent version** (`apps/web/lib/agent/version.ts`, `apps/web/app/api/agent/download/route.ts`, `apps/web/lib/agent/cache-prewarm.ts`)
+- `lib/agent/version.ts` — new module with `REQUIRED_AGENT_VERSION` constant; single source of truth for which agent version a given server release requires
+- Cache-prewarm fetches the specific GitHub release tagged `agent/<version>` rather than latest; logs a clear message when the release doesn't exist yet (local dev)
+- Download route serves the pinned versioned binary, falling back to an unversioned locally-built binary (`make agent`) for development
+- 503 error message names the missing release tag explicitly
+
+**Version derived from release-please manifest** (`apps/web/lib/agent/version.ts`, `apps/web/Dockerfile`)
+- `REQUIRED_AGENT_VERSION` is now read from `.release-please-manifest.json` at the repo root, which release-please updates automatically on every agent release — no manual version bumping required
+- Dockerfile updated to copy the manifest into both builder and runner stages so it is available at container runtime
+- Falls back to a hardcoded version with a console warning if the manifest cannot be found
+
+**Cross-platform agent build fixes** (`Makefile`, `.gitignore`, `agent/internal/heartbeat/disk_linux.go`, `agent/internal/heartbeat/disk_other.go`)
+- `make agent` now builds for all six platforms (linux/darwin/windows × amd64/arm64) and outputs to `apps/web/data/agent-dist/` with the correct naming convention matching the download route
+- `GOCACHE`/`GOPATH` fixed so the Docker build container can write its cache under `--user`
+- `readAllDisks()` extracted into `disk_linux.go` (build tag `linux`) and a stub `disk_other.go` (build tag `!linux`) so the agent cross-compiles cleanly for Windows/macOS
+- `apps/web/data/` added to `.gitignore` (generated binaries)
+
+**Build state**
+- `npm run build` — zero errors ✅
+- `go build ./agent/...` — compiles ✅
+- `go build ./apps/ingest/...` — compiles ✅
+
+---
 
 ### Session 7 — Ad-hoc agent queries (port and service discovery)
 
@@ -416,22 +493,22 @@ _None._
 
 ## What The Next Session Should Build
 
-**Session 8 — Alert rule builder + alert state machine**
+**Session 10 — Alert silencing + email notifications + TimescaleDB continuous aggregates**
 
-Check definitions, metric history, and ad-hoc server queries are working. The next step is alerting — when checks fail (or metrics exceed thresholds), operators should receive alerts.
+Alert rule builder, state machine, webhooks, and the full UI are working. The next improvements are:
 
-1. **Alert rules schema** — `alert_rules` table (org_id, host_id nullable for tag-based, name, condition: `check_status` | `metric_threshold`, config jsonb, severity: info/warn/critical, enabled); `alert_instances` table (rule_id, host_id, org_id, triggered_at, resolved_at, status: firing/resolved, message)
-2. **Alert evaluation** — on each ingest heartbeat, evaluate enabled alert rules for the host; fire when condition met and no active instance exists; resolve when condition no longer met
-3. **Alert list UI** — `/alerts` page showing active/recent alerts, severity badge, acknowledgement button
-4. **Notification channels (basic)** — webhook-based notification on alert fire/resolve (email deferred)
-5. **Alert badge on host detail** — count of active alerts shown in the host detail header
+1. **Alert silencing** — `alert_silences` table (rule_id or host_id scoped, start/end time, reason, created_by); silence banner in host detail and alerts page; suppresses new firings during active silence window
+2. **Email notifications** — add `type='email'` to `notificationChannels`; SMTP config in org settings; send alert.fired/resolved email with HTML template
+3. **Alert history improvements** — pagination on the recent history table; filter by date range; per-rule alert history on the Alerts tab
+4. **TimescaleDB continuous aggregates** — 1-hour and 1-day downsampled views on `host_metrics`; use downsampled data for 7-day range in the metrics graph to reduce query load
+5. **Metric retention UI** — expose retention period config in org settings (default 30 days)
 
 **Outstanding technical debt (carry forward):**
 - `codec.go` is a JSON stub — replace with protoc-generated files (`make proto` requires protoc + plugins)
 - mTLS client certificates deferred — TLS builder is structured for it
 - `go.work.sum` is gitignored — developers must run `go work sync` after cloning
-- Run migration `0006_icy_trish_tilby.sql` in production to create `checks` + `check_results` tables
-- Run migration for `agent_queries` table in production
+- Run migration `0008_alert_rules.sql` in production
+- Alerts page shows `hostId` raw — should join to display hostname (requires `getAlertInstances` to join `hosts.hostname`)
 
 ---
 
@@ -476,11 +553,12 @@ Check definitions, metric history, and ad-hoc server queries are working. The ne
 - [ ] TimescaleDB continuous aggregates
 - [ ] Metric retention policies
 - [x] Metric graphs (Recharts)
-- [ ] Alert rule builder
-- [ ] Alert state machine
-- [ ] Notification channels (email/webhook/Slack)
-- [ ] Alert silencing + acknowledgement
-- [ ] Alert history
+- [x] Alert rule builder (check_status + metric_threshold, per-host + org-wide)
+- [x] Alert state machine (fire/resolve in ingest; acknowledge in web)
+- [x] Notification channels (webhook with HMAC-SHA256 signing)
+- [ ] Alert silencing
+- [x] Alert acknowledgement
+- [ ] Alert history pagination + date filter
 
 ### Phase 3 — Certificate Management
 - [ ] Agent-side cert discovery

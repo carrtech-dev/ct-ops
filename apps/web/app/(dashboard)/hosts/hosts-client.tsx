@@ -23,6 +23,7 @@ import {
 } from '@/lib/actions/agents'
 import type { HostWithAgent } from '@/lib/actions/agents'
 import type { Agent } from '@/lib/db/schema'
+import { getActiveAlertCountsForHosts } from '@/lib/actions/alerts'
 
 interface HostsClientProps {
   orgId: string
@@ -96,6 +97,17 @@ export function HostsClient({
     queryKey: ['hosts', orgId],
     queryFn: () => listHosts(orgId),
     initialData: initialHosts,
+    refetchInterval: 30_000,
+  })
+
+  const { data: alertCounts = {} } = useQuery({
+    queryKey: ['alert-counts', orgId],
+    queryFn: async () => {
+      const ids = (hostsData ?? []).map((h) => h.id)
+      if (ids.length === 0) return {}
+      return getActiveAlertCountsForHosts(orgId, ids)
+    },
+    enabled: (hostsData?.length ?? 0) > 0,
     refetchInterval: 30_000,
   })
 
@@ -231,6 +243,7 @@ export function HostsClient({
                   <TableHead>CPU</TableHead>
                   <TableHead>Memory</TableHead>
                   <TableHead>Last Seen</TableHead>
+                  <TableHead>Alerts</TableHead>
                   <TableHead>Status</TableHead>
                 </TableRow>
               </TableHeader>
@@ -258,6 +271,15 @@ export function HostsClient({
                     <TableCell className="text-sm">{formatPercent(host.memoryPercent)}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {formatHeartbeat(host.lastSeenAt)}
+                    </TableCell>
+                    <TableCell>
+                      {(alertCounts[host.id] ?? 0) > 0 ? (
+                        <Badge className="bg-red-100 text-red-800 border-red-200 hover:bg-red-100">
+                          {alertCounts[host.id]}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground text-sm">—</span>
+                      )}
                     </TableCell>
                     <TableCell>
                       <StatusBadge status={host.status} />
