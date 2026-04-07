@@ -112,8 +112,11 @@ Wants=network-online.target
 
 [Service]
 ExecStart=/usr/local/bin/infrawatch-agent -config /etc/infrawatch/agent.toml
-Restart=on-failure
-RestartSec=10
+# Restart=always so that the agent comes back up after a clean self-update
+# exit (the update path swaps the binary and exits 0, relying on systemd to
+# re-exec it). on-failure would leave the service dead.
+Restart=always
+RestartSec=5
 StandardOutput=journal
 StandardError=journal
 
