@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/keepalive"
 
 	"github.com/infrawatch/ingest/internal/handlers"
 	agentv1 "github.com/infrawatch/proto/agent/v1"
@@ -35,8 +37,22 @@ func Serve(port int, creds credentials.TransportCredentials, reg *handlers.Regis
 		return fmt.Errorf("listening on :%d: %w", port, err)
 	}
 
+	// Permit the agent's 30s client pings (with safety margin) and proactively
+	// ping idle agents from the server side too, so a dead peer is detected
+	// within ~80s instead of waiting for the OS TCP timeout.
+	enforcement := keepalive.EnforcementPolicy{
+		MinTime:             10 * time.Second,
+		PermitWithoutStream: true,
+	}
+	serverKp := keepalive.ServerParameters{
+		Time:    60 * time.Second,
+		Timeout: 20 * time.Second,
+	}
+
 	opts := []grpc.ServerOption{
 		grpc.Creds(creds),
+		grpc.KeepaliveEnforcementPolicy(enforcement),
+		grpc.KeepaliveParams(serverKp),
 		grpc.ChainUnaryInterceptor(RecoveryUnaryInterceptor, LoggingUnaryInterceptor),
 		grpc.ChainStreamInterceptor(RecoveryStreamInterceptor, LoggingStreamInterceptor),
 	}
