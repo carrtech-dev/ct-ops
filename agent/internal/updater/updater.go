@@ -15,7 +15,6 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 )
@@ -87,20 +86,15 @@ func Update(latestVersion, downloadBaseURL string) error {
 
 	slog.Info("update downloaded, restarting agent", "version", latestVersion)
 
-	// Re-exec: start the new binary with the same arguments and environment,
-	// then exit the current process. Using exec.Command + os.Exit rather than
-	// syscall.Exec so this compiles and works on all target platforms including
-	// Windows.
-	cmd := exec.Command(exe, os.Args[1:]...) //nolint:gosec // exe is the path to our own binary
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Env = os.Environ()
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("starting updated agent process: %w", err)
+	// Re-exec into the updated binary. This is platform-specific:
+	//   - On Unix we use syscall.Exec so the running process is replaced in
+	//     place (same PID). This keeps systemd happy — it never sees the
+	//     service exit, and the cgroup is reused without being torn down.
+	//   - On Windows syscall.Exec is unavailable; reExec there spawns the new
+	//     binary as a child and exits, and the Windows service manager is
+	//     expected to be configured to restart on exit.
+	if err := reExec(exe, os.Args, os.Environ()); err != nil {
+		return fmt.Errorf("re-execing updated agent: %w", err)
 	}
-
-	os.Exit(0)
-	return nil // unreachable
+	return nil // unreachable on unix (syscall.Exec replaces the process)
 }
