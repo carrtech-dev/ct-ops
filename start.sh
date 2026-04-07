@@ -31,3 +31,14 @@ docker compose -f docker-compose.single.yml build web ingest
 docker compose -f docker-compose.single.yml pull
 docker compose -f docker-compose.single.yml down
 docker compose -f docker-compose.single.yml up -d
+
+# Wait for the DB to be ready and apply any pending migrations from the host.
+# This is a safety net: the web container also runs migrate.js on startup, but
+# Docker layer caching can cause a rebuilt image to miss newly added migration
+# files if the builder layer was cached before the file existed.
+echo "Waiting for database to be ready..."
+until docker compose -f docker-compose.single.yml exec db pg_isready -U infrawatch -d infrawatch &>/dev/null; do
+  sleep 1
+done
+echo "Applying database migrations..."
+pnpm --filter web run db:migrate
