@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.1](https://github.com/simonjcarr/infrawatch/compare/agent/v0.9.0...agent/v0.9.1) (2026-04-07)
+
+
+### Bug Fixes
+
+* **agent:** reuse HTTP client and reset stream dedup map on reconnect ([8f8e1df](https://github.com/simonjcarr/infrawatch/commit/8f8e1dfb0a785f00d2d55a00a8c59752f7287822))
+* **agent:** reuse HTTP client and reset stream dedup map on reconnect ([b6214ed](https://github.com/simonjcarr/infrawatch/commit/b6214edbf68bdf0dea2585066fa47948cbd1728b))
+
 ## [0.9.0](https://github.com/simonjcarr/infrawatch/compare/agent/v0.8.0...agent/v0.9.0) (2026-04-06)
 
 
