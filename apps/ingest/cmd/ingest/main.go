@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/infrawatch/ingest/internal/auth"
 	"github.com/infrawatch/ingest/internal/config"
@@ -81,6 +82,9 @@ func main() {
 			slog.Error("JWKS server error", "err", err)
 		}
 	}()
+
+	// Start cert expiry sweeper goroutine
+	go handlers.RunCertExpirySweeper(ctx, pool, 15*time.Minute)
 
 	// Start gRPC server in goroutine
 	grpcErr := make(chan error, 1)

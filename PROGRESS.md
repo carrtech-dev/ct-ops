@@ -6,14 +6,66 @@
 ---
 
 ## Current Phase
-**Phase 2 — Monitoring & Alerting**
+**Phase 3 — Certificate Management**
 
 ## Current Status
-🟡 Phase 2 in progress — Full alert pipeline built with multi-channel notifications (webhook + SMTP email). Notification channels now support test delivery with a result log dialog, in-place editing, and a three-way encryption selector (none/STARTTLS/SSL-TLS). SMTP dispatch is now wired into the Go ingest service — previously only webhooks were dispatched. Ingest evaluates rules on every heartbeat, fires/resolves instances. Alert rules support `check_status` and `metric_threshold`. Web UI has a live Alerts page, per-host Alerts tab, alert count badge in inventory, and a Global Alert Defaults settings page that auto-applies configured rules to every newly-approved host. mTLS and Redpanda deferred.
+🟢 Phase 3 complete — Certificate lifecycle management fully built. Agent performs TLS certificate checks via a new `certificate` check type, reports a structured JSON `CertificateReport` payload. Ingest persists certificates to the DB with upsert semantics, renewal detection, and event history. Web UI provides an inventory page at `/certificates` with summary cards and sortable/filterable table, plus a detail page showing SANs, chain, fingerprint, and event timeline. Alert system extended with `cert_expiry` condition type; per-org evaluator fires/resolves on every cert scan and a background sweeper runs every 15 minutes.
 
 ---
 
 ## What Has Been Built
+
+### Session 14 — Phase 3 Certificate Management
+
+**Database schema** (`apps/web/lib/db/schema/certificates.ts`, migration `0011_empty_maverick.sql`)
+- New `certificates` table with composite unique index on `(org_id, host, port, server_name, fingerprint_sha256)`, expiry and status indexes, soft delete, `source` column (`discovered|imported|issued`) for future CA work, `discoveredByHostId` field (semantically scoped to discovery, not deployment)
+- New `certificate_events` table for append-only event spine: discovered, renewed, expiring_soon, expired, restored, removed
+- `CertificateStatus`, `CertificateSource`, `CertificateEventType` TypeScript types
+
+**Web: check type extension** (`apps/web/lib/db/schema/checks.ts`, `apps/web/lib/actions/checks.ts`)
+- Added `'certificate'` to `CheckType` union and `CertificateCheckConfig` to `CheckConfig`
+- Zod schema in `createCheck` / `updateCheck` accepts the new type
+
+**Web: server actions** (`apps/web/lib/actions/certificates.ts`, `apps/web/lib/certificates/expiry.ts`)
+- `getCertificates(orgId, filters)` — paginated, filterable by status/host, sortable
+- `getCertificate(orgId, certId)` — returns cert + events
+- `getCertificateCounts(orgId)` — valid/expiring_soon/expired/invalid tallies
+- `deleteCertificate(orgId, certId)` — soft delete
+- `computeExpiryStatus(notAfter, warnDays)` and `formatDaysUntil(date)` helpers
+
+**Web: UI** (`apps/web/app/(dashboard)/certificates/`, `apps/web/components/certificates/`)
+- `CertificatesClient` — summary cards, host filter, status/sort selects, sortable table defaulting to soonest-expiry-first
+- `/certificates/[id]` detail page — summary cards, fingerprint copy, SANs chips, chain table, event timeline
+- `CertificateStatusBadge` — valid/expiring_soon/expired/invalid with correct color coding
+- Replaced placeholder page.tsx
+
+**Web: alert rule extension** (`apps/web/lib/db/schema/alerts.ts`, `apps/web/lib/actions/alerts.ts`, `apps/web/app/(dashboard)/hosts/[id]/alerts-tab.tsx`)
+- `CertExpiryConfig` interface and `'cert_expiry'` added to `AlertConditionType` and `AlertRuleConfig`
+- Zod `certExpiryConfigSchema` added to create/update schemas
+- `AddRuleDialog` extended: scope radio (All / Specific), cert picker, days-before-expiry input; `ruleConditionSummary` handles cert_expiry display
+
+**Agent: certificate check** (`agent/internal/checks/certificate.go`, `agent/internal/checks/executor.go`)
+- `runCertificateCheck(cfg)` — dials with mTLS skip (intentional, own validation), parses leaf + chain, builds `CertificateReport` JSON
+- Returns `pass` (valid), `fail` (expired/not-yet-valid), or `error` (dial failure)
+- Dispatcher wired in executor.go
+
+**Ingest: certificate persistence** (`apps/ingest/internal/handlers/certificates.go`, `apps/ingest/internal/db/queries/certificates.sql.go`)
+- `persistCertificateResult` — unmarshals report, computes status, upserts via natural key, detects renewal (new fingerprint for same endpoint emits `renewed` event on both old and new rows), writes discovered/status-change events
+- Wired into heartbeat handler via per-heartbeat `GetChecksForHost` type map
+
+**Ingest: cert expiry alert evaluator + sweeper** (`apps/ingest/internal/handlers/alerts.go`, `apps/ingest/cmd/ingest/main.go`)
+- `evaluateCertExpiryForCert` — called immediately after persist; loads org's cert_expiry rules, evaluates each
+- `evaluateCertExpiryRule` — fires/resolves `alert_instances` row keyed by `ruleID + metadata.certificateId`; uses cert's `discovered_by_host_id` as FK-safe `host_id`; dispatches via existing webhook + SMTP pipeline
+- `RunCertExpirySweeper` goroutine — ticks every 15 min, sweeps all orgs with cert_expiry rules
+- Sweeper started from `main.go`
+
+**Go queries** (`apps/ingest/internal/db/queries/certificates.sql.go`)
+- `UpsertCertificate`, `FindCertsForEndpoint`, `InsertCertificateEvent`, `GetActiveCertAlertInstance`, `InsertCertAlertInstance`, `GetCertExpiryRulesForOrg`, `GetAllOrgsWithCertExpiryRules`, `ListCertificatesExpiringWithin`, `GetCertificateByID`
+
+**Build state**
+- `pnpm run build` (apps/web) — zero TypeScript errors ✅
+- `go build ./apps/ingest/... ./agent/...` — zero errors ✅
+- Migration `0011_empty_maverick.sql` generated ✅
 
 ### Session 13 — Alert silencing + migration runner root-cause fix
 
