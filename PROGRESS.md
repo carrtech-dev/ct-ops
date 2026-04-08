@@ -9,11 +9,36 @@
 **Phase 2 — Monitoring & Alerting**
 
 ## Current Status
-🟡 Phase 2 in progress — Full alert pipeline built with multi-channel notifications (webhook + SMTP email). Notification channels now support test delivery with a result log dialog, in-place editing, and a three-way encryption selector (none/STARTTLS/SSL-TLS). SMTP dispatch is now wired into the Go ingest service — previously only webhooks were dispatched. Ingest evaluates rules on every heartbeat, fires/resolves instances. Alert rules support `check_status` and `metric_threshold`. Web UI has a live Alerts page, per-host Alerts tab, alert count badge in inventory, and a Global Alert Defaults settings page that auto-applies configured rules to every newly-approved host. mTLS and Redpanda deferred.
+🟡 Phase 2 in progress — Full alert pipeline built with multi-channel notifications (webhook + SMTP email). Notification channels now support test delivery with a result log dialog, in-place editing, and a three-way encryption selector (none/STARTTLS/SSL-TLS). SMTP dispatch is now wired into the Go ingest service — previously only webhooks were dispatched. Ingest evaluates rules on every heartbeat, fires/resolves instances. Alert rules support `check_status` and `metric_threshold`. Web UI has a live Alerts page, per-host Alerts tab, alert count badge in inventory, and a Global Alert Defaults settings page that auto-applies configured rules to every newly-approved host. Agent self-update now picks up new releases within 5 minutes without an ingest restart. Docker multi-arch CI uses native arm64 runners (no QEMU). mTLS and Redpanda deferred.
 
 ---
 
 ## What Has Been Built
+
+### Session 14 — Agent self-update reliability + native multi-arch CI
+
+**Heartbeat backoff reset after stable stream** (`agent/internal/heartbeat/heartbeat.go`)
+- The reconnect backoff now resets to 1 s when a stream ran stably for at least 10 s (`minStableTime`)
+- Prevents a transient blip (e.g. firewall state expiry) from locking the agent into a slow 60 s retry cycle on the next failure
+
+**Agent self-update: live version refresh in ingest** (`apps/ingest/internal/config/version_poller.go`, `apps/ingest/internal/handlers/heartbeat.go`, `apps/ingest/cmd/ingest/main.go`)
+- Root cause: ingest read `latestVersion` from `.release-please-manifest.json` once at startup and cached it for the process lifetime. The UI's "available version" display uses the `/api/agent/latest` endpoint which queries GitHub live, so UI and ingest diverged whenever a new release was cut without an ingest restart — producing step-wise upgrades (v0.9.0 → v0.11.0 on first restart, v0.11.0 → v0.11.1 on a second).
+- Added `VersionPoller` struct: seeds from the startup config value, then re-reads the manifest from disk every 5 minutes in a background goroutine using `atomic.Value` for lock-free reads
+- `HeartbeatHandler` replaced `latestVersion string` field with `*config.VersionPoller`; calls `versionPoller.Get()` on each heartbeat so agents are notified of new releases within 5 minutes of the manifest being updated — no service restart required
+- Version changes logged at Info level ("agent latest version updated") for observability
+
+**Docker multi-arch builds: native runners instead of QEMU** (`.github/workflows/docker-publish.yml`)
+- Root cause: both web and ingest jobs used a single `ubuntu-latest` runner with QEMU emulating arm64; `pnpm install` under QEMU was taking 60+ minutes.
+- Replaced with a platform matrix — `ubuntu-latest` (linux/amd64) and `ubuntu-24.04-arm` (linux/arm64) — running in parallel as native builds; arm64 build time drops to ~2–3 minutes
+- Each platform job builds and pushes by digest (`push-by-digest=true`), uploads the digest as an artifact; a downstream `merge-web` / `merge-ingest` job downloads both digests and runs `docker buildx imagetools create` to produce the final multi-arch manifest list
+- GHA cache scoped per platform (`scope=web-amd64`, `scope=web-arm64`) to prevent cross-arch cache collisions
+- No more QEMU step required in any job
+
+**Build state**
+- `go build ./apps/ingest/...` — compiles ✅
+- `go build ./agent/...` — compiles ✅
+
+---
 
 ### Session 13 — Alert silencing + migration runner root-cause fix
 
