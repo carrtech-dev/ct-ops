@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/infrawatch/ingest/internal/auth"
 	"github.com/infrawatch/ingest/internal/config"
@@ -66,7 +67,9 @@ func main() {
 
 	// Build handlers
 	regHandler := handlers.NewRegisterHandler(pool, issuer)
-	hbHandler := handlers.NewHeartbeatHandler(pool, issuer, q, cfg.Agent.LatestVersion, cfg.Agent.DownloadBaseURL)
+	versionPoller := config.NewVersionPoller(cfg.Agent.LatestVersion, 5*time.Minute)
+	versionPoller.Start(ctx)
+	hbHandler := handlers.NewHeartbeatHandler(pool, issuer, q, versionPoller, cfg.Agent.DownloadBaseURL)
 
 	// Start JWKS HTTP server
 	go func() {

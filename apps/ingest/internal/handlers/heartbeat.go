@@ -14,6 +14,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/infrawatch/ingest/internal/auth"
+	"github.com/infrawatch/ingest/internal/config"
 	"github.com/infrawatch/ingest/internal/db/queries"
 	"github.com/infrawatch/ingest/internal/queue"
 	agentv1 "github.com/infrawatch/proto/agent/v1"
@@ -24,17 +25,17 @@ type HeartbeatHandler struct {
 	pool            *pgxpool.Pool
 	issuer          *auth.JWTIssuer
 	publisher       queue.Publisher
-	latestVersion   string
+	versionPoller   *config.VersionPoller
 	downloadBaseURL string
 }
 
 // NewHeartbeatHandler creates a HeartbeatHandler.
-func NewHeartbeatHandler(pool *pgxpool.Pool, issuer *auth.JWTIssuer, pub queue.Publisher, latestVersion, downloadBaseURL string) *HeartbeatHandler {
+func NewHeartbeatHandler(pool *pgxpool.Pool, issuer *auth.JWTIssuer, pub queue.Publisher, versionPoller *config.VersionPoller, downloadBaseURL string) *HeartbeatHandler {
 	return &HeartbeatHandler{
 		pool:            pool,
 		issuer:          issuer,
 		publisher:       pub,
-		latestVersion:   latestVersion,
+		versionPoller:   versionPoller,
 		downloadBaseURL: downloadBaseURL,
 	}
 }
@@ -292,18 +293,20 @@ func (h *HeartbeatHandler) processHeartbeat(
 	resp := &agentv1.HeartbeatResponse{Ok: true}
 
 	// Signal an update when the agent is running a different version than the
-	// configured latest, and the agent is not a dev build.
-	if h.latestVersion != "" &&
+	// latest known version, and the agent is not a dev build.
+	// latestVersion is read from the poller so it refreshes without a restart.
+	latestVersion := h.versionPoller.Get()
+	if latestVersion != "" &&
 		req.AgentVersion != "" &&
 		req.AgentVersion != "dev" &&
-		req.AgentVersion != h.latestVersion {
+		req.AgentVersion != latestVersion {
 		resp.UpdateAvailable = true
-		resp.LatestVersion = h.latestVersion
+		resp.LatestVersion = latestVersion
 		resp.DownloadURL = h.downloadBaseURL + "/api/agent/download"
 		slog.Info("signalling agent update",
 			"agent_id", agentID,
 			"current", req.AgentVersion,
-			"latest", h.latestVersion,
+			"latest", latestVersion,
 		)
 	}
 
