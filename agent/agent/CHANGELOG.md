@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.0](https://github.com/simonjcarr/infrawatch/compare/agent/v0.13.1...agent/v0.14.0) (2026-04-09)
+
+
+### Features
+
+* **phase4:** implement service account and SSH key discovery ([a175e9a](https://github.com/simonjcarr/infrawatch/commit/a175e9a12496c01873cd37683bb584afc367edbd))
+* **phase4:** service account and SSH key discovery ([ba4c754](https://github.com/simonjcarr/infrawatch/commit/ba4c7546fb477c041be2e6d68e7d7c7a825b3c8d))
+
 ## [0.13.1](https://github.com/simonjcarr/infrawatch/compare/agent/v0.13.0...agent/v0.13.1) (2026-04-09)
 
 
