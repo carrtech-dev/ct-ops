@@ -6,14 +6,38 @@
 ---
 
 ## Current Phase
-**Phase 3 — Certificate Management**
+**Phase 3 — Certificate Management (bug fixes)**
 
 ## Current Status
-🟢 Phase 3 complete — Certificate lifecycle management fully built. Agent performs TLS certificate checks via a new `certificate` check type, reports a structured JSON `CertificateReport` payload. Ingest persists certificates to the DB with upsert semantics, renewal detection, and event history. Web UI provides an inventory page at `/certificates` with summary cards and sortable/filterable table, plus a detail page showing SANs, chain, fingerprint, and event timeline. Alert system extended with `cert_expiry` condition type; per-org evaluator fires/resolves on every cert scan and a background sweeper runs every 15 minutes.
+🟢 Phase 3 complete and stable — Certificate lifecycle management fully built and production bugs resolved. Agent performs TLS certificate checks via a new `certificate` check type, reports a structured JSON `CertificateReport` payload. Ingest persists certificates to the DB with upsert semantics, renewal detection, and event history. Web UI provides an inventory page at `/certificates` with summary cards and sortable/filterable table, plus a detail page showing SANs, chain, fingerprint, and event timeline. Alert system extended with `cert_expiry` condition type; per-org evaluator fires/resolves on every cert scan and a background sweeper runs every 15 minutes. Production Docker deployment bugs fixed: server action mismatches on certificate pages resolved via proper API routes; certificate chain date rendering crash fixed.
 
 ---
 
 ## What Has Been Built
+
+### Session 17 — Certificate page production bug fixes
+
+**Problem 1: `Failed to find Server Action` on certificates list and detail pages**
+- Root cause: `getCertificates`, `getCertificateCounts`, and `getCertificate` were all called from TanStack Query `queryFn` inside client components. Server actions use POST and are identified by a build-time hash; in production standalone Docker builds, client and server bundles can have drifted action IDs across deployments, causing Next.js to reject the requests.
+- Fix (list page): added `GET /api/certificates` and `GET /api/certificates/counts` route handlers (`apps/web/app/api/certificates/route.ts`, `apps/web/app/api/certificates/counts/route.ts`). `CertificatesClient` `queryFn` now uses `fetch()` against these routes. Added `initialData` and `staleTime: 30s` so SSR data is used on first render without an immediate refetch.
+- Fix (detail page): removed `useQuery` from `CertificateDetailClient` entirely — the server page already SSR-fetches the certificate and passes it as props, so no client-side refetch was needed.
+- `deleteCertificate` mutation continues to use the server action (correct pattern — mutations are the intended use case for server actions).
+
+**Problem 2: `RangeError: Invalid time value` crash on certificate chain table**
+- Root cause: `CertificateChainEntry` TypeScript interface in `apps/web/lib/db/schema/certificates.ts` declared fields as camelCase (`notAfter`, `notBefore`, `fingerprintSha256`) but the Go ingest handler serialises `certChainEntry` with snake_case JSON tags (`not_after`, `not_before`, `fingerprint_sha256`). Every read of `entry.notAfter` in the chain table returned `undefined` → `new Date(undefined)` → Invalid Date → `date-fns format()` threw `RangeError: Invalid time value` during SSR, crashing the detail page.
+- Fix: corrected `CertificateChainEntry` to use snake_case keys matching the Go JSON output; updated the chain table in `certificate-detail-client.tsx` to use `entry.not_after` and `entry.fingerprint_sha256`.
+
+**Other fixes on this branch (not yet merged to main at session start)**
+- `fix(ci)`: tracked `agent-dist` directory so Docker `COPY` succeeds in CI (`288291d`)
+- `feat(checks)`: added `cert_file` check type to Add Check dialog and fixed cert JSON display (`9ad2882`)
+- `fix(ci)`: bumped ingest Dockerfile to `golang:1.25-alpine` (`3c5ef71`)
+- `fix(web)`: fixed EACCES on `agent-dist` volume mount by switching to root entrypoint with `su-exec` privilege drop (`909494d`)
+
+**Build state**
+- `pnpm run build` (apps/web) — zero TypeScript errors ✅
+- `GET /api/certificates` and `GET /api/certificates/counts` routes appear in build output ✅
+
+---
 
 ### Session 16 — Phase 3 Certificate Management
 
