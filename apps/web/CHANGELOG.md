@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/simonjcarr/infrawatch/compare/web/v0.7.1...web/v0.8.0) (2026-04-09)
+
+
+### Features
+
+* **checks:** add cert_file check type and fix cert result display ([bcb6cfb](https://github.com/simonjcarr/infrawatch/commit/bcb6cfb2d8abf210af619efe582fd1747cecfe3c))
+
 ## [0.7.1](https://github.com/simonjcarr/infrawatch/compare/web/v0.7.0...web/v0.7.1) (2026-04-08)
 
 

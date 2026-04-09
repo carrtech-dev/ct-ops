@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.13.0](https://github.com/simonjcarr/infrawatch/compare/agent/v0.12.0...agent/v0.13.0) (2026-04-09)
+
+
+### Features
+
+* **checks:** add cert_file check type and fix cert JSON display ([9ad2882](https://github.com/simonjcarr/infrawatch/commit/9ad2882b5c76005b5ba5df9b56d90be353bffbcb))
+* **checks:** add cert_file check type and fix cert result display ([bcb6cfb](https://github.com/simonjcarr/infrawatch/commit/bcb6cfb2d8abf210af619efe582fd1747cecfe3c))
+
 ## [0.12.0](https://github.com/simonjcarr/infrawatch/compare/agent/v0.11.3...agent/v0.12.0) (2026-04-08)
 
 
