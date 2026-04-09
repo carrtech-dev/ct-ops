@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.3](https://github.com/simonjcarr/infrawatch/compare/web/v0.8.2...web/v0.8.3) (2026-04-09)
+
+
+### Bug Fixes
+
+* **web:** replace server action queryFns with API routes on certificates pages ([52cb1c5](https://github.com/simonjcarr/infrawatch/commit/52cb1c56d94118d8c2849edcfee8b89aa649bf30))
+* **web:** resolve Failed to find Server Action errors on certificates pages ([7b219e8](https://github.com/simonjcarr/infrawatch/commit/7b219e86649ee54360352614b44118950a5bd4d4))
+
 ## [0.8.2](https://github.com/simonjcarr/infrawatch/compare/web/v0.8.1...web/v0.8.2) (2026-04-09)
 
 
