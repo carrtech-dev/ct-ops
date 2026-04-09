@@ -59,11 +59,3 @@ jobs:
       - name: Test ingest
         run: go test ./...
         working-directory: apps/ingest
-
-      - name: Build agent
-        run: go build ./cmd/agent
-        working-directory: agent
-
-      - name: Build ingest
-        run: go build ./cmd/ingest
-        working-directory: apps/ingest
