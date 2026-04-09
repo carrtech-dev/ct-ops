@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.10.0](https://github.com/simonjcarr/infrawatch/compare/web/v0.9.0...web/v0.10.0) (2026-04-09)
+
+
+### Features
+
+* **phase4:** implement service account and SSH key discovery ([a175e9a](https://github.com/simonjcarr/infrawatch/commit/a175e9a12496c01873cd37683bb584afc367edbd))
+* **phase4:** service account and SSH key discovery ([ba4c754](https://github.com/simonjcarr/infrawatch/commit/ba4c7546fb477c041be2e6d68e7d7c7a825b3c8d))
+
 ## [0.9.0](https://github.com/simonjcarr/infrawatch/compare/web/v0.8.4...web/v0.9.0) (2026-04-09)
 
 
