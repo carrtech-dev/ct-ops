@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
         .where(eq(users.id, userId))
     } else {
       // Check if a user with this email already exists (merge case)
-      let existingUser = ldapUser.email
+      const existingUser = ldapUser.email
         ? await db.query.users.findFirst({
             where: eq(users.email, ldapUser.email),
           })
