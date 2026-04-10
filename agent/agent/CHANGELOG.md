@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.1](https://github.com/simonjcarr/infrawatch/compare/agent/v0.14.0...agent/v0.14.1) (2026-04-10)
+
+
+### Bug Fixes
+
+* **phase4:** fix migration ordering, metadata overwrite & add password/lock tracking ([96a9fd0](https://github.com/simonjcarr/infrawatch/commit/96a9fd0ee37292909bea2ac0067ecc1b1903a792))
+* **phase4:** fix migration ordering, metadata overwrite & add password/lock tracking ([1e303c2](https://github.com/simonjcarr/infrawatch/commit/1e303c2ccc69acd0294a27671f71010ef36ef303))
+
 ## [0.14.0](https://github.com/simonjcarr/infrawatch/compare/agent/v0.13.1...agent/v0.14.0) (2026-04-09)
 
 
