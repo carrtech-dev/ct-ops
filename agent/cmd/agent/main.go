@@ -30,6 +30,7 @@ func main() {
 	tokenFlag := flag.String("token", "", "Enrolment token (overrides config file and INFRAWATCH_ORG_TOKEN)")
 	addressFlag := flag.String("address", "", "Ingest address host:port (overrides config file and INFRAWATCH_INGEST_ADDRESS)")
 	installFlag := flag.Bool("install", false, "Install agent as a system service and exit (requires --token)")
+	uninstallFlag := flag.Bool("uninstall", false, "Stop and remove the agent service, binary, config, and data files")
 	tlsSkipVerifyFlag := flag.Bool("tls-skip-verify", false, "Skip TLS certificate verification — use when ingest uses a self-signed cert (insecure)")
 	versionFlag := flag.Bool("version", false, "Print agent version and exit")
 	versionFlagShort := flag.Bool("v", false, "Print agent version and exit (shorthand)")
@@ -52,6 +53,15 @@ func main() {
 		}
 		if err := install.Run(*tokenFlag, strings.TrimSpace(*addressFlag), *tlsSkipVerifyFlag); err != nil {
 			slog.Error("install failed", "err", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
+	// ── Uninstall mode: stop service, remove all agent files, then exit ───────
+	if *uninstallFlag {
+		if err := install.Uninstall(); err != nil {
+			slog.Error("uninstall failed", "err", err)
 			os.Exit(1)
 		}
 		os.Exit(0)
