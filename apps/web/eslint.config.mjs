@@ -12,8 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    // Plain CommonJS Node.js script — not part of the TypeScript module graph
+    // Plain CommonJS Node.js scripts — not part of the TypeScript module graph
     "migrate.js",
+    "scripts/validate-migrations.js",
   ]),
 ]);
 
