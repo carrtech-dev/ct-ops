@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.11.1](https://github.com/simonjcarr/infrawatch/compare/web/v0.11.0...web/v0.11.1) (2026-04-10)
+
+
+### Bug Fixes
+
+* **phase4:** fix migration ordering, metadata overwrite & add password/lock tracking ([96a9fd0](https://github.com/simonjcarr/infrawatch/commit/96a9fd0ee37292909bea2ac0067ecc1b1903a792))
+* **phase4:** fix migration ordering, metadata overwrite & add password/lock tracking ([1e303c2](https://github.com/simonjcarr/infrawatch/commit/1e303c2ccc69acd0294a27671f71010ef36ef303))
+
 ## [0.11.0](https://github.com/simonjcarr/infrawatch/compare/web/v0.10.1...web/v0.11.0) (2026-04-10)
 
 
