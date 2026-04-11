@@ -1,10 +1,11 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow, format, formatDuration, intervalToDuration } from 'date-fns'
 import {
   ArrowLeft,
+  Ban,
   CheckCircle2,
   XCircle,
   Clock,
@@ -16,7 +17,19 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
-import { getTaskRun } from '@/lib/actions/task-runs'
+import { Button } from '@/components/ui/button'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
+import { cancelTaskRun, getTaskRun } from '@/lib/actions/task-runs'
 import type { TaskRunWithHosts, TaskRunHostWithHost } from '@/lib/actions/task-runs'
 import type { PatchTaskResult, PatchTaskConfig } from '@/lib/db/schema'
 
@@ -25,8 +38,8 @@ interface Props {
   initialTaskRun: TaskRunWithHosts
 }
 
-const TERMINAL_STATUSES = new Set(['success', 'failed', 'skipped'])
-const RUN_TERMINAL_STATUSES = new Set(['completed', 'failed'])
+const TERMINAL_STATUSES = new Set(['success', 'failed', 'skipped', 'cancelled'])
+const RUN_TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled'])
 
 function isHostTerminal(status: string) {
   return TERMINAL_STATUSES.has(status)
@@ -46,6 +59,10 @@ function HostStatusIcon({ status }: { status: string }) {
       return <XCircle className="size-4 text-red-500 shrink-0" />
     case 'running':
       return <Loader2 className="size-4 text-blue-500 animate-spin shrink-0" />
+    case 'cancelling':
+      return <Loader2 className="size-4 text-orange-400 animate-spin shrink-0" />
+    case 'cancelled':
+      return <Ban className="size-4 text-orange-500 shrink-0" />
     case 'skipped':
       return <SkipForward className="size-4 text-gray-400 shrink-0" />
     default:
@@ -61,6 +78,10 @@ function RunStatusBadge({ status }: { status: string }) {
       return <Badge className="bg-red-100 text-red-800 border-red-200 hover:bg-red-100">Failed</Badge>
     case 'running':
       return <Badge className="bg-blue-100 text-blue-800 border-blue-200 hover:bg-blue-100"><Loader2 className="size-3 mr-1 animate-spin" />Running</Badge>
+    case 'cancelling':
+      return <Badge className="bg-orange-100 text-orange-700 border-orange-200 hover:bg-orange-100"><Loader2 className="size-3 mr-1 animate-spin" />Cancelling…</Badge>
+    case 'cancelled':
+      return <Badge className="bg-orange-100 text-orange-800 border-orange-200 hover:bg-orange-100"><Ban className="size-3 mr-1" />Cancelled</Badge>
     default:
       return <Badge className="bg-gray-100 text-gray-600 border-gray-200 hover:bg-gray-100"><Clock className="size-3 mr-1" />Pending</Badge>
   }
@@ -144,6 +165,16 @@ function OutputPanel({ hostRow, isLive }: { hostRow: TaskRunHostWithHost; isLive
       >
         {hostRow.status === 'skipped' ? (
           <p className="text-zinc-500 italic">Skipped: {hostRow.skipReason ?? 'no reason given'}</p>
+        ) : hostRow.status === 'cancelling' ? (
+          <p className="text-zinc-500 italic">
+            <Loader2 className="inline size-3.5 mr-1 -mt-0.5 animate-spin text-orange-400" />
+            Cancellation requested — waiting for agent to stop the process…
+          </p>
+        ) : hostRow.status === 'cancelled' && !hostRow.rawOutput ? (
+          <p className="text-orange-400 italic">
+            <Ban className="inline size-3.5 mr-1 -mt-0.5" />
+            Task was cancelled.
+          </p>
         ) : hostRow.status === 'pending' ? (
           <p className="text-zinc-500 italic">
             <Clock className="inline size-3.5 mr-1 -mt-0.5" />
@@ -191,9 +222,71 @@ function OutputPanel({ hostRow, isLive }: { hostRow: TaskRunHostWithHost; isLive
   )
 }
 
+// ── Stop button ───────────────────────────────────────────────────────────────
+
+function StopButton({
+  orgId,
+  taskRunId,
+  onCancelled,
+}: {
+  orgId: string
+  taskRunId: string
+  onCancelled: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const mutation = useMutation({
+    mutationFn: () => cancelTaskRun(orgId, taskRunId),
+    onSuccess: (result) => {
+      if ('error' in result) return
+      setOpen(false)
+      onCancelled()
+    },
+  })
+
+  return (
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <AlertDialogTrigger asChild>
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-orange-600 border-orange-200 hover:bg-orange-50 hover:text-orange-700"
+        >
+          <Ban className="size-3.5 mr-1.5" />
+          Stop
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Stop this task run?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Running hosts will receive a cancellation signal and their processes
+            will be stopped. Pending hosts will be cancelled immediately. This
+            cannot be undone.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Keep running</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            onClick={(e) => {
+              e.preventDefault()
+              mutation.mutate()
+            }}
+            disabled={mutation.isPending}
+          >
+            {mutation.isPending && <Loader2 className="size-3.5 mr-1.5 animate-spin" />}
+            Stop task
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  )
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function TaskMonitorClient({ orgId, initialTaskRun }: Props) {
+  const queryClient = useQueryClient()
   const [selectedHostId, setSelectedHostId] = useState<string | null>(
     initialTaskRun.hosts[0]?.hostId ?? null,
   )
@@ -225,6 +318,10 @@ export function TaskMonitorClient({ orgId, initialTaskRun }: Props) {
   const successHosts = taskRun.hosts.filter((h) => h.status === 'success').length
   const failedHosts = taskRun.hosts.filter((h) => h.status === 'failed').length
   const skippedHosts = taskRun.hosts.filter((h) => h.status === 'skipped').length
+  const cancelledHosts = taskRun.hosts.filter(
+    (h) => h.status === 'cancelled' || h.status === 'cancelling',
+  ).length
+  const canStop = taskRun.status === 'pending' || taskRun.status === 'running'
   const rebootRequired = taskRun.hosts.some(
     (h) => (h.result as PatchTaskResult | null)?.reboot_required,
   )
@@ -274,6 +371,17 @@ export function TaskMonitorClient({ orgId, initialTaskRun }: Props) {
               </Badge>
             )}
             <RunStatusBadge status={taskRun.status} />
+            {canStop && (
+              <StopButton
+                orgId={orgId}
+                taskRunId={taskRun.id}
+                onCancelled={() =>
+                  queryClient.invalidateQueries({
+                    queryKey: ['task-run', orgId, taskRun.id],
+                  })
+                }
+              />
+            )}
           </div>
         </div>
 
@@ -285,6 +393,7 @@ export function TaskMonitorClient({ orgId, initialTaskRun }: Props) {
               {successHosts > 0 && ` · ${successHosts} succeeded`}
               {failedHosts > 0 && ` · ${failedHosts} failed`}
               {skippedHosts > 0 && ` · ${skippedHosts} skipped`}
+              {cancelledHosts > 0 && ` · ${cancelledHosts} cancelled`}
             </span>
             <span>{progressPct}%</span>
           </div>

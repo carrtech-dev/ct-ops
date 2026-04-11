@@ -120,5 +120,6 @@ message HeartbeatResponse {
   string download_url = 6;    // base URL to fetch the updated binary from
   repeated CheckDefinition checks = 7;
   repeated AgentQuery pending_queries = 8;
-  AgentTask pending_task = 9;  // current pending task (one at a time; absent = none)
+  AgentTask pending_task = 9;          // current pending task (one at a time; absent = none)
+  repeated string cancel_task_ids = 10; // task_run_hosts.id values the agent must cancel immediately
 }

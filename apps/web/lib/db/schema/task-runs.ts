@@ -5,8 +5,8 @@ import { hosts } from './hosts'
 import { users } from './auth'
 
 export type TaskType = 'patch' | 'custom_script'
-export type TaskRunStatus = 'pending' | 'running' | 'completed' | 'failed'
-export type TaskRunHostStatus = 'pending' | 'running' | 'success' | 'failed' | 'skipped'
+export type TaskRunStatus = 'pending' | 'running' | 'cancelling' | 'cancelled' | 'completed' | 'failed'
+export type TaskRunHostStatus = 'pending' | 'running' | 'cancelling' | 'cancelled' | 'success' | 'failed' | 'skipped'
 
 // Config shapes — discriminated by task_type
 export interface PatchTaskConfig { mode: 'security' | 'all' }

@@ -64,6 +64,34 @@ func GetPendingTasksForHost(ctx context.Context, pool *pgxpool.Pool, hostID stri
 	return result, rows.Err()
 }
 
+// GetCancellingTasksForHost returns the task_run_hosts IDs for a given host
+// that are in 'cancelling' status. These IDs are sent to the agent so it can
+// stop the corresponding in-flight processes.
+func GetCancellingTasksForHost(ctx context.Context, pool *pgxpool.Pool, hostID string) ([]string, error) {
+	const q = `
+		SELECT id
+		FROM task_run_hosts
+		WHERE host_id    = $1
+		  AND status     = 'cancelling'
+		  AND deleted_at IS NULL
+	`
+	rows, err := pool.Query(ctx, q, hostID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // MarkTaskRunHostRunning transitions a task_run_hosts row to 'running' and
 // also transitions the parent task_run to 'running' if it is still 'pending'.
 // This is done atomically so that a concurrent ingest instance cannot dispatch
@@ -121,9 +149,11 @@ func CompleteTaskRunHost(
 	if resultJSON != "" {
 		resultArg = resultJSON
 	}
+	// If the row is currently 'cancelling', persist 'cancelled' regardless of
+	// the agent-reported outcome — the user requested the stop.
 	const q = `
 		UPDATE task_run_hosts
-		SET status       = $2,
+		SET status       = CASE WHEN status = 'cancelling' THEN 'cancelled' ELSE $2 END,
 		    exit_code    = $3,
 		    result       = $4::jsonb,
 		    completed_at = NOW(),
@@ -141,11 +171,11 @@ func TimeoutStuckTaskRunHosts(ctx context.Context, pool *pgxpool.Pool, maxAge ti
 	const q = `
 		WITH timed_out AS (
 		  UPDATE task_run_hosts
-		  SET status       = 'failed',
+		  SET status       = CASE WHEN status = 'cancelling' THEN 'cancelled' ELSE 'failed' END,
 		      exit_code    = -1,
 		      completed_at = NOW(),
 		      updated_at   = NOW()
-		  WHERE status     = 'running'
+		  WHERE status     IN ('running', 'cancelling')
 		    AND deleted_at IS NULL
 		    AND started_at < NOW() - ($1 || ' seconds')::interval
 		  RETURNING task_run_id
@@ -156,21 +186,26 @@ func TimeoutStuckTaskRunHosts(ctx context.Context, pool *pgxpool.Pool, maxAge ti
 		run_counts AS (
 		  SELECT
 		    a.task_run_id,
-		    COUNT(*) FILTER (WHERE trh.status NOT IN ('success','failed','skipped')) AS still_active,
-		    COUNT(*) FILTER (WHERE trh.status = 'failed')                           AS failed_count
+		    COUNT(*) FILTER (WHERE trh.status NOT IN ('success','failed','skipped','cancelled')) AS still_active,
+		    COUNT(*) FILTER (WHERE trh.status = 'failed')                                       AS failed_count,
+		    COUNT(*) FILTER (WHERE trh.status = 'cancelled')                                    AS cancelled_count
 		  FROM affected a
 		  JOIN task_run_hosts trh
 		    ON trh.task_run_id = a.task_run_id AND trh.deleted_at IS NULL
 		  GROUP BY a.task_run_id
 		)
 		UPDATE task_runs tr
-		SET status       = CASE WHEN rc.failed_count > 0 THEN 'failed' ELSE 'completed' END,
+		SET status       = CASE
+		                     WHEN rc.failed_count    > 0 THEN 'failed'
+		                     WHEN rc.cancelled_count > 0 THEN 'cancelled'
+		                     ELSE 'completed'
+		                   END,
 		    completed_at = NOW(),
 		    updated_at   = NOW()
 		FROM run_counts rc
 		WHERE tr.id             = rc.task_run_id
 		  AND rc.still_active   = 0
-		  AND tr.status NOT IN ('completed', 'failed')
+		  AND tr.status NOT IN ('completed', 'failed', 'cancelled')
 	`
 	secs := int64(maxAge.Seconds())
 	_, err := pool.Exec(ctx, q, secs)
@@ -188,19 +223,24 @@ func MaybeCompleteTaskRun(ctx context.Context, pool *pgxpool.Pool, taskRunHostID
 		),
 		counts AS (
 		  SELECT
-		    COUNT(*) FILTER (WHERE status NOT IN ('success','failed','skipped')) AS active,
-		    COUNT(*) FILTER (WHERE status = 'failed')                           AS failed
+		    COUNT(*) FILTER (WHERE status NOT IN ('success','failed','skipped','cancelled')) AS active,
+		    COUNT(*) FILTER (WHERE status = 'failed')                                       AS failed,
+		    COUNT(*) FILTER (WHERE status = 'cancelled')                                    AS cancelled
 		  FROM task_run_hosts
 		  WHERE task_run_id = (SELECT task_run_id FROM run)
 		    AND deleted_at  IS NULL
 		)
 		UPDATE task_runs
-		SET status       = CASE WHEN (SELECT failed FROM counts) > 0 THEN 'failed' ELSE 'completed' END,
+		SET status       = CASE
+		                     WHEN (SELECT failed    FROM counts) > 0 THEN 'failed'
+		                     WHEN (SELECT cancelled FROM counts) > 0 THEN 'cancelled'
+		                     ELSE 'completed'
+		                   END,
 		    completed_at = NOW(),
 		    updated_at   = NOW()
 		WHERE id         = (SELECT task_run_id FROM run)
 		  AND (SELECT active FROM counts) = 0
-		  AND status NOT IN ('completed', 'failed')
+		  AND status NOT IN ('completed', 'failed', 'cancelled')
 	`
 	_, err := pool.Exec(ctx, q, taskRunHostID)
 	return err
