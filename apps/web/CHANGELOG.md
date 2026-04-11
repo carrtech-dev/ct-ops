@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.14.3](https://github.com/simonjcarr/infrawatch/compare/web/v0.14.2...web/v0.14.3) (2026-04-11)
+
+
+### Bug Fixes
+
+* **ldap:** cap TLS certificate preview at 5 lines with vertical scroll ([17245ca](https://github.com/simonjcarr/infrawatch/commit/17245cabc52543c90db509778a353c51893599d8))
+* **ldap:** cap TLS certificate preview at 5 lines with vertical scroll ([3923409](https://github.com/simonjcarr/infrawatch/commit/3923409718436f9a5e60efbd8ae80f7752152ccb))
+
 ## [0.14.2](https://github.com/simonjcarr/infrawatch/compare/web/v0.14.1...web/v0.14.2) (2026-04-11)
 
 
