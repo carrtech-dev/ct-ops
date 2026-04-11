@@ -140,6 +140,12 @@ func (h *HeartbeatHandler) Heartbeat(stream agentv1.IngestService_HeartbeatServe
 	agentCheckTicker := time.NewTicker(30 * time.Second)
 	defer agentCheckTicker.Stop()
 
+	// Scan for task_run_hosts rows that have been 'running' for more than
+	// 60 minutes with no completion signal. This catches cases where the agent
+	// dies mid-task or a bug prevents the result from being reported.
+	taskTimeoutTicker := time.NewTicker(5 * time.Minute)
+	defer taskTimeoutTicker.Stop()
+
 loop:
 	for {
 		select {
@@ -165,6 +171,11 @@ loop:
 			}
 			if err := h.processHeartbeat(ctx, stream, agentID, agent.OrganisationID, hostID, agent.Hostname, req); err != nil {
 				return err
+			}
+
+		case <-taskTimeoutTicker.C:
+			if err := queries.TimeoutStuckTaskRunHosts(ctx, h.pool, 60*time.Minute); err != nil {
+				slog.Warn("timing out stuck task run hosts", "err", err)
 			}
 
 		case <-agentCheckTicker.C:
