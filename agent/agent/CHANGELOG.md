@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.17.0](https://github.com/simonjcarr/infrawatch/compare/agent/v0.16.0...agent/v0.17.0) (2026-04-11)
+
+
+### Features
+
+* **tasks:** add general agent task framework with Linux host patching ([#106](https://github.com/simonjcarr/infrawatch/issues/106)) ([1a6b48a](https://github.com/simonjcarr/infrawatch/commit/1a6b48a520d5079b61e4b9d71b2e49108f0da44a))
+* **tasks:** add general agent task framework with Linux host patching ([#106](https://github.com/simonjcarr/infrawatch/issues/106)) ([4cd4efa](https://github.com/simonjcarr/infrawatch/commit/4cd4efa38252ce6fd485b1551936089895493990))
+
 ## [0.16.0](https://github.com/simonjcarr/infrawatch/compare/agent/v0.15.0...agent/v0.16.0) (2026-04-11)
 
 
