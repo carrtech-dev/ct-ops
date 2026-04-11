@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	agentv1 "github.com/infrawatch/proto/agent/v1"
 )
@@ -44,6 +45,10 @@ func RunPatch(ctx context.Context, configJSON string, progressFn func(chunk stri
 	if cfg.Mode == "" {
 		cfg.Mode = "all"
 	}
+
+	// Apply a hard 45-minute timeout so the task cannot hang indefinitely.
+	ctx, cancel := context.WithTimeout(ctx, 45*time.Minute)
+	defer cancel()
 
 	pm, err := detectPackageManager()
 	if err != nil {
@@ -128,6 +133,11 @@ func buildPatchCommand(pm, mode string) (*exec.Cmd, error) {
 
 // runCommandStreaming runs cmd, streaming stdout+stderr to progressFn in line
 // batches. Returns the exit code and the full combined output.
+//
+// The scanner runs in a separate goroutine so the command can write output
+// without blocking (io.Pipe is synchronous). After the process exits we close
+// the write-end of the pipe to signal EOF to the scanner, then wait for it to
+// flush any remaining lines before returning.
 func runCommandStreaming(ctx context.Context, cmd *exec.Cmd, progressFn func(chunk string)) (exitCode int, rawOutput string, err error) {
 	cmd.Env = append(os.Environ(), "DEBIAN_FRONTEND=noninteractive")
 
@@ -136,34 +146,61 @@ func runCommandStreaming(ctx context.Context, cmd *exec.Cmd, progressFn func(chu
 	cmd.Stderr = pw
 
 	if err := cmd.Start(); err != nil {
+		_ = pr.CloseWithError(err)
+		_ = pw.CloseWithError(err)
 		return -1, "", fmt.Errorf("starting command: %w", err)
 	}
 
-	// Collect output line-by-line, forwarding batches to progressFn.
+	// Scanner goroutine: reads lines and forwards batches to progressFn.
+	// Must run concurrently with the command (io.Pipe has no internal buffer —
+	// the command's writes block until we read).
 	var sb strings.Builder
-	scanner := bufio.NewScanner(pr)
-	var batch strings.Builder
-	lineCount := 0
-
-	for scanner.Scan() {
-		line := scanner.Text() + "\n"
-		sb.WriteString(line)
-		batch.WriteString(line)
-		lineCount++
-		if lineCount >= 10 {
-			progressFn(batch.String())
-			batch.Reset()
-			lineCount = 0
+	scanDone := make(chan struct{})
+	go func() {
+		defer close(scanDone)
+		scanner := bufio.NewScanner(pr)
+		// Use a 1 MB line buffer to handle long package manager output lines.
+		scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+		var batch strings.Builder
+		lineCount := 0
+		for scanner.Scan() {
+			line := scanner.Text() + "\n"
+			sb.WriteString(line)
+			batch.WriteString(line)
+			lineCount++
+			if lineCount >= 10 {
+				progressFn(batch.String())
+				batch.Reset()
+				lineCount = 0
+			}
 		}
-	}
-	// Flush remaining lines
-	if batch.Len() > 0 {
-		progressFn(batch.String())
+		if batch.Len() > 0 {
+			progressFn(batch.String())
+		}
+	}()
+
+	// Context watcher: kill the process if the context is cancelled (timeout).
+	go func() {
+		select {
+		case <-ctx.Done():
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill()
+			}
+		case <-scanDone:
+			// Completed normally — nothing to kill.
+		}
+	}()
+
+	// Wait for the process to exit, then close pw to signal EOF to the scanner.
+	waitErr := cmd.Wait()
+	_ = pw.Close()
+	<-scanDone // Wait for all buffered output to be flushed.
+
+	if ctx.Err() != nil {
+		return -1, sb.String(), fmt.Errorf("command cancelled: %w", ctx.Err())
 	}
 
-	pw.Close()
-
-	if waitErr := cmd.Wait(); waitErr != nil {
+	if waitErr != nil {
 		if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			return exitErr.ExitCode(), sb.String(), nil
 		}

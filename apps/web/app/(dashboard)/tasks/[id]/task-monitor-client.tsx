@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { formatDistanceToNow, format } from 'date-fns'
+import { formatDistanceToNow, format, formatDuration, intervalToDuration } from 'date-fns'
 import {
   ArrowLeft,
   CheckCircle2,
@@ -12,6 +12,7 @@ import {
   RotateCcw,
   SkipForward,
   Terminal,
+  AlertTriangle,
 } from 'lucide-react'
 import Link from 'next/link'
 import { Badge } from '@/components/ui/badge'
@@ -65,6 +66,19 @@ function RunStatusBadge({ status }: { status: string }) {
   }
 }
 
+// ── Elapsed time hook ─────────────────────────────────────────────────────────
+
+function useElapsedSeconds(startedAt: Date | null | string | undefined, active: boolean): number {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!active || !startedAt) return
+    const id = setInterval(() => setNow(Date.now()), 5_000)
+    return () => clearInterval(id)
+  }, [active, startedAt])
+  if (!startedAt) return 0
+  return Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000))
+}
+
 // ── Output panel ──────────────────────────────────────────────────────────────
 
 function OutputPanel({ hostRow, isLive }: { hostRow: TaskRunHostWithHost; isLive: boolean }) {
@@ -72,6 +86,12 @@ function OutputPanel({ hostRow, isLive }: { hostRow: TaskRunHostWithHost; isLive
   const scrollRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
   const prevOutputLen = useRef(0)
+
+  const elapsedSecs = useElapsedSeconds(hostRow.startedAt, isLive && hostRow.status === 'running')
+  const elapsedMins = Math.floor(elapsedSecs / 60)
+  const hasNoOutput = !hostRow.rawOutput
+  // Warn if running for > 5 minutes with no output from the command
+  const isStuck = isLive && hostRow.status === 'running' && hasNoOutput && elapsedMins >= 5
 
   // Auto-scroll to bottom when new output arrives and the user hasn't scrolled up.
   useEffect(() => {
@@ -91,12 +111,22 @@ function OutputPanel({ hostRow, isLive }: { hostRow: TaskRunHostWithHost; isLive
 
   const result = hostRow.result as PatchTaskResult | null
 
+  const elapsedLabel =
+    elapsedSecs > 0
+      ? formatDuration(intervalToDuration({ start: 0, end: elapsedSecs * 1000 }), {
+          format: elapsedSecs < 60 ? ['seconds'] : elapsedSecs < 3600 ? ['minutes', 'seconds'] : ['hours', 'minutes'],
+        })
+      : null
+
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Output header */}
       <div className="flex items-center gap-2 px-3 py-2 border-b bg-zinc-900 text-zinc-300 text-xs rounded-t-md">
         <Terminal className="size-3.5" />
         <span className="font-mono">{hostRow.host.displayName ?? hostRow.host.hostname}</span>
+        {isLive && elapsedLabel && (
+          <span className="text-zinc-500 ml-1">({elapsedLabel})</span>
+        )}
         {isLive && <span className="ml-auto text-blue-400 animate-pulse">● live</span>}
         {result?.reboot_required && (
           <Badge className="ml-auto bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-100 text-xs">
@@ -114,13 +144,38 @@ function OutputPanel({ hostRow, isLive }: { hostRow: TaskRunHostWithHost; isLive
       >
         {hostRow.status === 'skipped' ? (
           <p className="text-zinc-500 italic">Skipped: {hostRow.skipReason ?? 'no reason given'}</p>
+        ) : hostRow.status === 'pending' ? (
+          <p className="text-zinc-500 italic">
+            <Clock className="inline size-3.5 mr-1 -mt-0.5" />
+            Waiting for agent to pick up task…
+          </p>
+        ) : hostRow.status === 'running' && hasNoOutput ? (
+          <div className="space-y-3">
+            <p className="text-zinc-500 italic">
+              <Loader2 className="inline size-3.5 mr-1 -mt-0.5 animate-spin" />
+              Agent connected — waiting for command output…
+              {elapsedLabel && <span className="text-zinc-600"> ({elapsedLabel} elapsed)</span>}
+            </p>
+            {isStuck && (
+              <div className="border border-amber-700 rounded p-2 text-amber-400 not-italic space-y-1">
+                <p className="flex items-center gap-1.5 font-semibold">
+                  <AlertTriangle className="size-3.5 shrink-0" />
+                  No output received for {elapsedMins} minutes
+                </p>
+                <p className="text-amber-500 text-xs">
+                  The patch command may still be starting up, or the agent may have lost its connection.
+                  The task will be automatically failed after 60 minutes if no response is received.
+                </p>
+              </div>
+            )}
+          </div>
         ) : hostRow.rawOutput ? (
           <>
             {hostRow.rawOutput}
             <div ref={bottomRef} />
           </>
         ) : (
-          <p className="text-zinc-500 italic">Waiting for output…</p>
+          <p className="text-zinc-500 italic">No output captured.</p>
         )}
       </div>
 

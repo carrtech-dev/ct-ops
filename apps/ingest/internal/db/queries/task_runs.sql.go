@@ -2,6 +2,7 @@ package queries
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -130,6 +131,49 @@ func CompleteTaskRunHost(
 		WHERE id = $1
 	`
 	_, err := pool.Exec(ctx, q, taskRunHostID, hostStatus, exitCode, resultArg)
+	return err
+}
+
+// TimeoutStuckTaskRunHosts marks any task_run_hosts rows that have been in
+// 'running' status for longer than maxAge as 'failed', then closes any parent
+// task_run whose all hosts are now in a terminal state.
+func TimeoutStuckTaskRunHosts(ctx context.Context, pool *pgxpool.Pool, maxAge time.Duration) error {
+	const q = `
+		WITH timed_out AS (
+		  UPDATE task_run_hosts
+		  SET status       = 'failed',
+		      exit_code    = -1,
+		      completed_at = NOW(),
+		      updated_at   = NOW()
+		  WHERE status     = 'running'
+		    AND deleted_at IS NULL
+		    AND started_at < NOW() - ($1 || ' seconds')::interval
+		  RETURNING task_run_id
+		),
+		affected AS (
+		  SELECT DISTINCT task_run_id FROM timed_out
+		),
+		run_counts AS (
+		  SELECT
+		    a.task_run_id,
+		    COUNT(*) FILTER (WHERE trh.status NOT IN ('success','failed','skipped')) AS still_active,
+		    COUNT(*) FILTER (WHERE trh.status = 'failed')                           AS failed_count
+		  FROM affected a
+		  JOIN task_run_hosts trh
+		    ON trh.task_run_id = a.task_run_id AND trh.deleted_at IS NULL
+		  GROUP BY a.task_run_id
+		)
+		UPDATE task_runs tr
+		SET status       = CASE WHEN rc.failed_count > 0 THEN 'failed' ELSE 'completed' END,
+		    completed_at = NOW(),
+		    updated_at   = NOW()
+		FROM run_counts rc
+		WHERE tr.id             = rc.task_run_id
+		  AND rc.still_active   = 0
+		  AND tr.status NOT IN ('completed', 'failed')
+	`
+	secs := int64(maxAge.Seconds())
+	_, err := pool.Exec(ctx, q, secs)
 	return err
 }
 
