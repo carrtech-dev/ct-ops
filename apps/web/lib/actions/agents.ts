@@ -578,6 +578,23 @@ export async function deleteHost(
       //     can no longer connect; without this the agent keeps heartbeating
       //     against a host row that no longer exists)
       if (host.agentId) {
+        // Fetch the enrolment token ID before deleting the agent so we can
+        // decrement the usage counter — keeping it in sync with live registrations
+        const agent = await tx.query.agents.findFirst({
+          where: eq(agents.id, host.agentId),
+          columns: { enrolmentTokenId: true },
+        })
+
+        if (agent?.enrolmentTokenId) {
+          await tx
+            .update(agentEnrolmentTokens)
+            .set({
+              usageCount: sql`GREATEST(usage_count - 1, 0)`,
+              updatedAt: new Date(),
+            })
+            .where(eq(agentEnrolmentTokens.id, agent.enrolmentTokenId))
+        }
+
         await tx
           .delete(agentStatusHistory)
           .where(eq(agentStatusHistory.agentId, host.agentId))
