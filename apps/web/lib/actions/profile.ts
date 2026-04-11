@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { db } from '@/lib/db'
 import { users } from '@/lib/db/schema'
 import { eq } from 'drizzle-orm'
-import { headers } from 'next/headers'
+import { headers, cookies } from 'next/headers'
 
 const updateNameSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters').max(100),
@@ -64,6 +64,38 @@ export async function updateEmail(
     return { success: true }
   } catch (err) {
     console.error('Failed to update email:', err)
+    return { error: 'An unexpected error occurred' }
+  }
+}
+
+const themeSchema = z.enum(['light', 'dark', 'system'])
+
+export async function updateTheme(
+  userId: string,
+  theme: string,
+): Promise<{ success: true } | { error: string }> {
+  const parsed = themeSchema.safeParse(theme)
+  if (!parsed.success) {
+    return { error: 'Invalid theme value' }
+  }
+
+  try {
+    await db
+      .update(users)
+      .set({ theme: parsed.data, updatedAt: new Date() })
+      .where(eq(users.id, userId))
+
+    const cookieStore = await cookies()
+    cookieStore.set('theme', parsed.data, {
+      path: '/',
+      maxAge: 60 * 60 * 24 * 365,
+      sameSite: 'lax',
+      httpOnly: false,
+    })
+
+    return { success: true }
+  } catch (err) {
+    console.error('Failed to update theme:', err)
     return { error: 'An unexpected error occurred' }
   }
 }

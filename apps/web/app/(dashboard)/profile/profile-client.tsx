@@ -10,9 +10,32 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { CheckCircle2, ShieldCheck } from 'lucide-react'
-import { updateName, updatePassword } from '@/lib/actions/profile'
+import { CheckCircle2, ShieldCheck, Sun, Moon, Monitor } from 'lucide-react'
+import { updateName, updatePassword, updateTheme } from '@/lib/actions/profile'
 import type { SessionUser } from '@/lib/auth/session'
+
+type Theme = 'light' | 'dark' | 'system'
+
+const THEME_OPTIONS: { value: Theme; label: string; icon: React.ReactNode }[] = [
+  { value: 'light', label: 'Light', icon: <Sun className="size-4" /> },
+  { value: 'dark', label: 'Dark', icon: <Moon className="size-4" /> },
+  { value: 'system', label: 'System', icon: <Monitor className="size-4" /> },
+]
+
+function applyTheme(theme: Theme) {
+  const root = document.documentElement
+  if (theme === 'dark') {
+    root.classList.add('dark')
+  } else if (theme === 'light') {
+    root.classList.remove('dark')
+  } else {
+    if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      root.classList.add('dark')
+    } else {
+      root.classList.remove('dark')
+    }
+  }
+}
 
 const nameSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters').max(100),
@@ -39,6 +62,8 @@ export function ProfileClient({ user }: ProfileClientProps) {
   const [nameSaveSuccess, setNameSaveSuccess] = useState(false)
   const [passwordSuccess, setPasswordSuccess] = useState(false)
   const [passwordError, setPasswordError] = useState<string | null>(null)
+  const [currentTheme, setCurrentTheme] = useState<Theme>((user.theme as Theme) ?? 'system')
+  const [themeSaving, setThemeSaving] = useState(false)
 
   const nameForm = useForm<NameValues>({
     resolver: zodResolver(nameSchema),
@@ -224,6 +249,44 @@ export function ProfileClient({ user }: ProfileClientProps) {
           <Badge variant={user.twoFactorEnabled ? 'default' : 'outline'}>
             {user.twoFactorEnabled ? 'Enabled' : 'Disabled'}
           </Badge>
+        </CardContent>
+      </Card>
+
+      {/* Appearance */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Appearance</CardTitle>
+          <CardDescription>Choose how Infrawatch looks for you</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex gap-3">
+            {THEME_OPTIONS.map((option) => {
+              const isSelected = currentTheme === option.value
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  disabled={themeSaving}
+                  onClick={async () => {
+                    if (isSelected) return
+                    setCurrentTheme(option.value)
+                    applyTheme(option.value)
+                    setThemeSaving(true)
+                    await updateTheme(user.id, option.value)
+                    setThemeSaving(false)
+                  }}
+                  className={`flex flex-col items-center gap-2 rounded-lg border px-5 py-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50 ${
+                    isSelected
+                      ? 'border-primary bg-primary/10 text-foreground'
+                      : 'border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground'
+                  }`}
+                >
+                  {option.icon}
+                  {option.label}
+                </button>
+              )
+            })}
+          </div>
         </CardContent>
       </Card>
     </div>

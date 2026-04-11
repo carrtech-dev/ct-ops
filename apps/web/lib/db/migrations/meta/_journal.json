@@ -162,6 +162,13 @@
       "when": 1775930310437,
       "tag": "0022_black_silhouette",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1775939464641,
+      "tag": "0023_high_loki",
+      "breakpoints": true
     }
   ]
 }
