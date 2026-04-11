@@ -239,6 +239,21 @@ loop:
 				slog.Info("dispatched task to agent", "host_id", hostID, "task_run_host_id", t.ID, "task_type", t.TaskType)
 			}
 		}
+
+			// Send cancellation signals for any tasks the user has stopped.
+			cancelIDs, err := queries.GetCancellingTasksForHost(ctx, h.pool, hostID)
+			if err != nil {
+				slog.Warn("fetching cancelling tasks", "host_id", hostID, "err", err)
+			} else if len(cancelIDs) > 0 {
+				if err := stream.Send(&agentv1.HeartbeatResponse{
+					Ok:            true,
+					CancelTaskIds: cancelIDs,
+				}); err != nil {
+					slog.Warn("pushing cancel task IDs to agent", "host_id", hostID, "err", err)
+					return err
+				}
+				slog.Info("pushed cancel task IDs to agent", "host_id", hostID, "count", len(cancelIDs))
+			}
 	}
 
 	// Mark agent and host offline on stream close

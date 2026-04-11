@@ -66,6 +66,10 @@ type Runner struct {
 	// re-sends the same task before the agent has reported a result.
 	seenTaskIDs map[string]struct{}
 
+	// taskCancelFuncs maps task_run_host_id → context.CancelFunc for every
+	// task currently running on this agent. Used to stop tasks on server request.
+	taskCancelFuncs sync.Map
+
 	// Signalled when new query results are ready so the send loop can fire
 	// an immediate heartbeat rather than waiting for the next 30s tick.
 	resultsReady chan struct{}
@@ -262,6 +266,16 @@ func (r *Runner) handleResponse(ctx context.Context, resp *agentv1.HeartbeatResp
 			go r.executeTask(ctx, resp.PendingTask)
 		}
 	}
+	if len(resp.CancelTaskIds) > 0 {
+		for _, id := range resp.CancelTaskIds {
+			if fn, ok := r.taskCancelFuncs.Load(id); ok {
+				slog.Info("cancelling task on server request", "task_id", id)
+				fn.(context.CancelFunc)()
+			} else {
+				slog.Debug("cancel request for task not in flight (may have already completed)", "task_id", id)
+			}
+		}
+	}
 	if resp.UpdateAvailable && resp.DownloadUrl != "" {
 		slog.Info("agent update available, downloading",
 			"current", r.version,
@@ -323,7 +337,16 @@ func (r *Runner) drainQueryResults() []*agentv1.AgentQueryResult {
 
 // executeTask runs the task in the background, forwarding incremental output
 // chunks via progressFn and buffering the final result for the next heartbeat.
+// Each task gets its own derived context so it can be cancelled independently
+// via handleResponse without tearing down the whole heartbeat stream.
 func (r *Runner) executeTask(ctx context.Context, task *agentv1.AgentTask) {
+	taskCtx, taskCancel := context.WithCancel(ctx)
+	r.taskCancelFuncs.Store(task.TaskId, taskCancel)
+	defer func() {
+		taskCancel() // always release the context resources
+		r.taskCancelFuncs.Delete(task.TaskId)
+	}()
+
 	progressFn := func(chunk string) {
 		r.taskProgressMu.Lock()
 		r.taskProgress = append(r.taskProgress, &agentv1.AgentTaskProgress{
@@ -338,7 +361,7 @@ func (r *Runner) executeTask(ctx context.Context, task *agentv1.AgentTask) {
 		}
 	}
 
-	result := tasks.Dispatch(ctx, task, progressFn)
+	result := tasks.Dispatch(taskCtx, task, progressFn)
 
 	r.taskResultsMu.Lock()
 	r.taskResults = append(r.taskResults, result)

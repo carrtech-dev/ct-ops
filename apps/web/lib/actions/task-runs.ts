@@ -7,7 +7,7 @@ import {
   hosts,
   hostGroupMembers,
 } from '@/lib/db/schema'
-import { eq, and, isNull, desc, inArray } from 'drizzle-orm'
+import { eq, and, isNull, desc, inArray, or } from 'drizzle-orm'
 import type {
   TaskRun,
   TaskRunHost,
@@ -193,6 +193,83 @@ export async function listTaskRunsForGroup(
   })
 
   return Promise.all(runs.map((run) => getTaskRun(orgId, run.id).then((r) => r!)))
+}
+
+// ── Cancellation ──────────────────────────────────────────────────────────────
+
+/**
+ * Cancels an active task run.
+ * - Pending hosts (not yet started) are marked 'cancelled' immediately.
+ * - Running hosts are moved to 'cancelling'; the ingest service will signal
+ *   the agent to stop the process and the row will transition to 'cancelled'
+ *   once the agent acknowledges.
+ * - The parent task_run is marked 'cancelling'.
+ */
+export async function cancelTaskRun(
+  orgId: string,
+  taskRunId: string,
+): Promise<{ success: true } | { error: string }> {
+  try {
+    return await db.transaction(async (tx) => {
+      // Verify ownership and that the run is still active.
+      const run = await tx.query.taskRuns.findFirst({
+        where: and(
+          eq(taskRuns.id, taskRunId),
+          eq(taskRuns.organisationId, orgId),
+          isNull(taskRuns.deletedAt),
+        ),
+      })
+      if (!run) return { error: 'Task run not found' }
+      if (['completed', 'failed', 'cancelled', 'cancelling'].includes(run.status)) {
+        return { error: 'Task run is already finished or being cancelled' }
+      }
+
+      const now = new Date()
+
+      // Cancel hosts that haven't started yet — no agent signal needed.
+      await tx
+        .update(taskRunHosts)
+        .set({ status: 'cancelled', completedAt: now, updatedAt: now })
+        .where(
+          and(
+            eq(taskRunHosts.taskRunId, taskRunId),
+            eq(taskRunHosts.organisationId, orgId),
+            eq(taskRunHosts.status, 'pending'),
+            isNull(taskRunHosts.deletedAt),
+          ),
+        )
+
+      // Signal running hosts to stop — the agent will acknowledge on the
+      // next heartbeat and the status will transition to 'cancelled'.
+      await tx
+        .update(taskRunHosts)
+        .set({ status: 'cancelling', updatedAt: now })
+        .where(
+          and(
+            eq(taskRunHosts.taskRunId, taskRunId),
+            eq(taskRunHosts.organisationId, orgId),
+            eq(taskRunHosts.status, 'running'),
+            isNull(taskRunHosts.deletedAt),
+          ),
+        )
+
+      // Move the parent run to 'cancelling' so the UI reflects the intent.
+      await tx
+        .update(taskRuns)
+        .set({ status: 'cancelling', updatedAt: now })
+        .where(
+          and(
+            eq(taskRuns.id, taskRunId),
+            isNull(taskRuns.deletedAt),
+          ),
+        )
+
+      return { success: true }
+    })
+  } catch (err) {
+    console.error('Failed to cancel task run:', err)
+    return { error: 'Failed to cancel task run' }
+  }
 }
 
 // ── Patch-specific actions ────────────────────────────────────────────────────

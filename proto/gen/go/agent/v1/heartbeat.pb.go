@@ -954,7 +954,8 @@ type HeartbeatResponse struct {
 	DownloadUrl     string                 `protobuf:"bytes,6,opt,name=download_url,json=downloadUrl,proto3" json:"download_url,omitempty"`              // base URL to fetch the updated binary from
 	Checks          []*CheckDefinition     `protobuf:"bytes,7,rep,name=checks,proto3" json:"checks,omitempty"`
 	PendingQueries  []*AgentQuery          `protobuf:"bytes,8,rep,name=pending_queries,json=pendingQueries,proto3" json:"pending_queries,omitempty"`
-	PendingTask     *AgentTask             `protobuf:"bytes,9,opt,name=pending_task,json=pendingTask,proto3" json:"pending_task,omitempty"` // current pending task (one at a time; absent = none)
+	PendingTask     *AgentTask             `protobuf:"bytes,9,opt,name=pending_task,json=pendingTask,proto3" json:"pending_task,omitempty"`          // current pending task (one at a time; absent = none)
+	CancelTaskIds   []string               `protobuf:"bytes,10,rep,name=cancel_task_ids,json=cancelTaskIds,proto3" json:"cancel_task_ids,omitempty"` // task_run_hosts.id values the agent must cancel immediately
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -1048,6 +1049,13 @@ func (x *HeartbeatResponse) GetPendingQueries() []*AgentQuery {
 func (x *HeartbeatResponse) GetPendingTask() *AgentTask {
 	if x != nil {
 		return x.PendingTask
+	}
+	return nil
+}
+
+func (x *HeartbeatResponse) GetCancelTaskIds() []string {
+	if x != nil {
+		return x.CancelTaskIds
 	}
 	return nil
 }
@@ -1146,7 +1154,7 @@ const file_agent_v1_heartbeat_proto_rawDesc = "" +
 	"\rcheck_results\x18\r \x03(\v2\x15.agent.v1.CheckResultR\fcheckResults\x12?\n" +
 	"\rquery_results\x18\x0e \x03(\v2\x1a.agent.v1.AgentQueryResultR\fqueryResults\x12@\n" +
 	"\rtask_progress\x18\x0f \x03(\v2\x1b.agent.v1.AgentTaskProgressR\ftaskProgress\x12<\n" +
-	"\ftask_results\x18\x10 \x03(\v2\x19.agent.v1.AgentTaskResultR\vtaskResults\"\x85\x03\n" +
+	"\ftask_results\x18\x10 \x03(\v2\x19.agent.v1.AgentTaskResultR\vtaskResults\"\xad\x03\n" +
 	"\x11HeartbeatResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12'\n" +
@@ -1156,7 +1164,9 @@ const file_agent_v1_heartbeat_proto_rawDesc = "" +
 	"\fdownload_url\x18\x06 \x01(\tR\vdownloadUrl\x121\n" +
 	"\x06checks\x18\a \x03(\v2\x19.agent.v1.CheckDefinitionR\x06checks\x12=\n" +
 	"\x0fpending_queries\x18\b \x03(\v2\x14.agent.v1.AgentQueryR\x0ependingQueries\x126\n" +
-	"\fpending_task\x18\t \x01(\v2\x13.agent.v1.AgentTaskR\vpendingTaskB.Z,github.com/infrawatch/proto/agent/v1;agentv1b\x06proto3"
+	"\fpending_task\x18\t \x01(\v2\x13.agent.v1.AgentTaskR\vpendingTask\x12&\n" +
+	"\x0fcancel_task_ids\x18\n" +
+	" \x03(\tR\rcancelTaskIdsB.Z,github.com/infrawatch/proto/agent/v1;agentv1b\x06proto3"
 
 var (
 	file_agent_v1_heartbeat_proto_rawDescOnce sync.Once

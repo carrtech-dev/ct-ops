@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -61,9 +62,26 @@ func RunPatch(ctx context.Context, configJSON string, progressFn func(chunk stri
 	}
 
 	exitCode, rawOutput, runErr := runCommandStreaming(ctx, cmd, progressFn)
-	if runErr != nil && exitCode == 0 {
-		// command couldn't start at all
-		return errorResult(runErr.Error())
+	if runErr != nil {
+		if exitCode == 0 {
+			// Command couldn't start at all.
+			return errorResult(runErr.Error())
+		}
+		// Process was killed via context — report the reason clearly.
+		if errors.Is(runErr, context.Canceled) {
+			return &agentv1.AgentTaskResult{
+				ExitCode: int32(exitCode),
+				Error:    "cancelled by user",
+			}
+		}
+		if errors.Is(runErr, context.DeadlineExceeded) {
+			return &agentv1.AgentTaskResult{
+				ExitCode: int32(exitCode),
+				Error:    "task timed out (exceeded 45 minutes)",
+			}
+		}
+		// Other kill (e.g. SIGKILL from outside): fall through and return the
+		// partial result so the output is preserved.
 	}
 
 	result := patchResult{
