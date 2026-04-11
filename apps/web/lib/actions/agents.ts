@@ -32,6 +32,7 @@ export type OfflinePeriod = { start: number; end: number | null }
 const createEnrolmentTokenSchema = z.object({
   label: z.string().min(1, 'Label is required').max(100),
   autoApprove: z.boolean().default(false),
+  skipVerify: z.boolean().default(false),
   maxUses: z.number().int().positive().optional(),
   expiresInDays: z.number().int().positive().optional(),
 })
@@ -155,7 +156,7 @@ export async function listHosts(orgId: string): Promise<HostWithAgent[]> {
 export async function createEnrolmentToken(
   orgId: string,
   userId: string,
-  input: { label: string; autoApprove: boolean; maxUses?: number; expiresInDays?: number },
+  input: { label: string; autoApprove: boolean; skipVerify?: boolean; maxUses?: number; expiresInDays?: number },
 ): Promise<{ token: string; id: string } | { error: string }> {
   const parsed = createEnrolmentTokenSchema.safeParse(input)
   if (!parsed.success) {
@@ -176,6 +177,7 @@ export async function createEnrolmentToken(
         label: parsed.data.label,
         createdById: userId,
         autoApprove: parsed.data.autoApprove,
+        skipVerify: parsed.data.skipVerify,
         maxUses: parsed.data.maxUses ?? null,
         expiresAt: expiresAt ?? null,
       })

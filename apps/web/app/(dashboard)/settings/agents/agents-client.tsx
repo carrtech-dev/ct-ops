@@ -6,7 +6,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { formatDistanceToNow, format } from 'date-fns'
-import { Plus, Trash2, Copy, Check, Key, RefreshCw } from 'lucide-react'
+import { Plus, Trash2, Copy, Check, Key, RefreshCw, Terminal } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -51,7 +51,7 @@ interface AgentsSettingsClientProps {
   initialTokens: AgentEnrolmentToken[]
 }
 
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text, icon }: { text: string; icon?: 'copy' | 'terminal' }) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = async () => {
@@ -60,15 +60,26 @@ function CopyButton({ text }: { text: string }) {
     setTimeout(() => setCopied(false), 2000)
   }
 
+  const Icon = icon === 'terminal' ? Terminal : Copy
+
   return (
     <Button variant="ghost" size="sm" onClick={handleCopy} className="h-6 w-6 p-0">
       {copied ? (
         <Check className="size-3 text-green-600" />
       ) : (
-        <Copy className="size-3 text-muted-foreground" />
+        <Icon className="size-3 text-muted-foreground" />
       )}
     </Button>
   )
+}
+
+function buildInstallCommand(token: string, skipVerify: boolean): string {
+  const installUrl = new URL(`${window.location.origin}/api/agent/install`)
+  installUrl.searchParams.set('token', token)
+  if (skipVerify) {
+    installUrl.searchParams.set('skip_verify', 'true')
+  }
+  return `curl -fsSL "${installUrl.toString()}" | sudo bash`
 }
 
 function tokenStatus(token: AgentEnrolmentToken): { label: string; className: string } {
@@ -120,6 +131,7 @@ export function AgentsSettingsClient({
       createEnrolmentToken(orgId, currentUserId, {
         label: data.label,
         autoApprove: data.autoApprove,
+        skipVerify: data.skipVerify,
         maxUses: data.maxUses !== '' && data.maxUses ? Number(data.maxUses) : undefined,
         expiresInDays:
           data.expiresInDays !== '' && data.expiresInDays ? Number(data.expiresInDays) : undefined,
@@ -208,6 +220,7 @@ export function AgentsSettingsClient({
                             {token.token.slice(0, 8)}…{token.token.slice(-4)}
                           </code>
                           <CopyButton text={token.token} />
+                          <CopyButton text={buildInstallCommand(token.token, token.skipVerify)} icon="terminal" />
                         </div>
                       </TableCell>
                       <TableCell>
