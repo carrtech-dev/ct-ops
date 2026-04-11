@@ -4,6 +4,23 @@ AGENT_DIST_DIR := apps/web/data/agent-dist
 
 PROTO_OUT := proto/gen/go
 
+# Persistent host-directory caches for Go builds.
+# Using host dirs (owned by the current user) avoids permission errors when
+# Docker runs with --user $(id -u):$(id -g) and a root-owned named volume.
+GO_CACHE_DIR := $(HOME)/.cache/infrawatch/go-build
+GO_MOD_DIR   := $(HOME)/.cache/infrawatch/go-mod
+
+# Host platform — used to cross-compile the ingest binary for the machine
+# running this Makefile (e.g. darwin/arm64 on Apple Silicon).
+HOST_OS   := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+HOST_ARCH := $(shell uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+
+GO_CACHE_ARGS := \
+	-e GOCACHE=/go-cache \
+	-e GOPATH=/go-home \
+	-v $(GO_CACHE_DIR):/go-cache \
+	-v $(GO_MOD_DIR):/go-home
+
 # Generate Go code from .proto sources.
 # Requires: protoc, protoc-gen-go, protoc-gen-go-grpc
 # Install: go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
@@ -23,15 +40,14 @@ go-build: agent ingest
 
 agent:
 	@echo "Building agent binaries for all platforms..."
-	@mkdir -p $(AGENT_DIST_DIR)
+	@mkdir -p $(AGENT_DIST_DIR) $(GO_CACHE_DIR) $(GO_MOD_DIR)
 	docker run --rm \
 		-v "$(CURDIR):/src" \
 		-w /src \
 		--user "$(shell id -u):$(shell id -g)" \
 		-e CGO_ENABLED=0 \
-		-e GOCACHE=/tmp/go-cache \
-		-e GOPATH=/tmp/go \
-		golang:1.23 \
+		$(GO_CACHE_ARGS) \
+		golang:1.25 \
 		sh -c 'for p in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do \
 			os=$${p%%/*}; arch=$${p##*/}; \
 			ext=""; [ "$$os" = "windows" ] && ext=".exe"; \
@@ -43,28 +59,37 @@ agent:
 
 ingest:
 	@echo "Building ingest service..."
-	@mkdir -p dist
+	@mkdir -p dist $(GO_CACHE_DIR) $(GO_MOD_DIR)
 	docker run --rm \
 		-v "$(CURDIR):/src" \
 		-w /src \
 		--user "$(shell id -u):$(shell id -g)" \
-		golang:1.23 \
+		-e GOOS=$(HOST_OS) \
+		-e GOARCH=$(HOST_ARCH) \
+		$(GO_CACHE_ARGS) \
+		golang:1.25 \
 		go build -o dist/ingest ./apps/ingest/cmd/ingest
-	@echo "Ingest binary: dist/ingest"
+	@echo "Ingest binary: dist/ingest ($(HOST_OS)/$(HOST_ARCH))"
 
 go-test:
+	@mkdir -p $(GO_CACHE_DIR) $(GO_MOD_DIR)
 	docker run --rm \
 		-v "$(CURDIR):/src" \
 		-w /src \
-		golang:1.23 \
+		--user "$(shell id -u):$(shell id -g)" \
+		$(GO_CACHE_ARGS) \
+		golang:1.25 \
 		go test ./agent/... ./apps/ingest/...
 
 # Download all Go dependencies.
 go-deps:
+	@mkdir -p $(GO_CACHE_DIR) $(GO_MOD_DIR)
 	docker run --rm \
 		-v "$(CURDIR):/src" \
 		-w /src \
-		golang:1.23 \
+		--user "$(shell id -u):$(shell id -g)" \
+		$(GO_CACHE_ARGS) \
+		golang:1.25 \
 		sh -c "go work sync && cd proto/gen/go && go mod tidy && cd /src/agent && go mod tidy && cd /src/apps/ingest && go mod tidy"
 
 # Generate dev TLS certificates for local development (requires Docker).
@@ -84,4 +109,8 @@ dev-tls:
 	@echo "Generated deploy/dev-tls/server.crt and deploy/dev-tls/server.key"
 
 clean:
-	rm -rf dist/ deploy/dev-tls/ $(AGENT_DIST_DIR)/
+	rm -rf dist/ deploy/dev-tls/ deploy/dev-ingest-data/ $(AGENT_DIST_DIR)/
+
+# Remove the persistent Go build/module cache directories.
+clean-cache:
+	rm -rf $(GO_CACHE_DIR) $(GO_MOD_DIR)
