@@ -6,7 +6,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { formatDistanceToNow, format } from 'date-fns'
-import { Plus, Trash2, Copy, Check, Key, RefreshCw, Terminal } from 'lucide-react'
+import { Plus, Trash2, Copy, Check, Key, RefreshCw, Eye } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -51,7 +51,7 @@ interface AgentsSettingsClientProps {
   initialTokens: AgentEnrolmentToken[]
 }
 
-function CopyButton({ text, icon }: { text: string; icon?: 'copy' | 'terminal' }) {
+function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = async () => {
@@ -60,14 +60,12 @@ function CopyButton({ text, icon }: { text: string; icon?: 'copy' | 'terminal' }
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const Icon = icon === 'terminal' ? Terminal : Copy
-
   return (
     <Button variant="ghost" size="sm" onClick={handleCopy} className="h-6 w-6 p-0">
       {copied ? (
         <Check className="size-3 text-green-600" />
       ) : (
-        <Icon className="size-3 text-muted-foreground" />
+        <Copy className="size-3 text-muted-foreground" />
       )}
     </Button>
   )
@@ -104,6 +102,7 @@ export function AgentsSettingsClient({
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [newTokenValue, setNewTokenValue] = useState<string | null>(null)
   const [newInstallCommand, setNewInstallCommand] = useState<string | null>(null)
+  const [viewToken, setViewToken] = useState<AgentEnrolmentToken | null>(null)
 
   const { data: tokens } = useQuery({
     queryKey: ['enrolment-tokens', orgId],
@@ -219,8 +218,14 @@ export function AgentsSettingsClient({
                           <code className="text-xs bg-muted px-1.5 py-0.5 rounded font-mono">
                             {token.token.slice(0, 8)}…{token.token.slice(-4)}
                           </code>
-                          <CopyButton text={token.token} />
-                          <CopyButton text={buildInstallCommand(token.token, token.skipVerify)} icon="terminal" />
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 w-6 p-0"
+                            onClick={() => setViewToken(token)}
+                          >
+                            <Eye className="size-3 text-muted-foreground" />
+                          </Button>
                         </div>
                       </TableCell>
                       <TableCell>
@@ -266,6 +271,40 @@ export function AgentsSettingsClient({
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={!!viewToken} onOpenChange={(open) => { if (!open) setViewToken(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Token: {viewToken?.label}</DialogTitle>
+            <DialogDescription>
+              Use the curl command to enrol a new agent, or copy the raw token for manual configuration.
+            </DialogDescription>
+          </DialogHeader>
+          {viewToken && (
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Install command</p>
+                <div className="flex items-start gap-2 p-3 bg-muted rounded-md">
+                  <code className="text-xs font-mono flex-1 break-all leading-relaxed">
+                    {buildInstallCommand(viewToken.token, viewToken.skipVerify)}
+                  </code>
+                  <CopyButton text={buildInstallCommand(viewToken.token, viewToken.skipVerify)} />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Raw token</p>
+                <div className="flex items-center gap-2 p-3 bg-muted rounded-md">
+                  <code className="text-xs font-mono flex-1 break-all">{viewToken.token}</code>
+                  <CopyButton text={viewToken.token} />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button onClick={() => setViewToken(null)}>Close</Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={showCreateDialog}
