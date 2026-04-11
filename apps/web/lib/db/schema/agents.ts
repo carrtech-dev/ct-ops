@@ -14,6 +14,7 @@ export const agentEnrolmentTokens = pgTable('agent_enrolment_tokens', {
     .notNull()
     .references(() => users.id),
   autoApprove: boolean('auto_approve').notNull().default(false),
+  skipVerify: boolean('skip_verify').notNull().default(false),
   maxUses: integer('max_uses'),
   usageCount: integer('usage_count').notNull().default(0),
   expiresAt: timestamp('expires_at', { withTimezone: true }),

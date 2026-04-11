@@ -141,6 +141,13 @@
       "when": 1775900000011,
       "tag": "0019_military_lionheart",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1775917720454,
+      "tag": "0020_glamorous_the_santerians",
+      "breakpoints": true
     }
   ]
 }
