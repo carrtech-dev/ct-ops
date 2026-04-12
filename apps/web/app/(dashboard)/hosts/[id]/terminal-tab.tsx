@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { Loader2, X, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { triggerCustomScriptRun, cancelTaskRun, getTaskRun } from '@/lib/actions/task-runs'
@@ -22,18 +21,17 @@ interface TerminalEntry {
   exitCode: number | null
 }
 
-function entryStatus(hostStatus: string): TerminalEntry['status'] {
+function hostStatusToEntry(hostStatus: string): TerminalEntry['status'] {
   switch (hostStatus) {
     case 'success': return 'success'
     case 'failed': return 'failed'
     case 'cancelled': return 'cancelled'
     case 'cancelling': return 'cancelling'
-    case 'running': return 'running'
     default: return 'running'
   }
 }
 
-function isTerminalStatus(status: TerminalEntry['status']): boolean {
+function isTerminal(status: TerminalEntry['status']): boolean {
   return status === 'success' || status === 'failed' || status === 'cancelled'
 }
 
@@ -43,10 +41,11 @@ export function TerminalTab({ orgId, host, userId }: Props) {
   const [interpreter, setInterpreter] = useState<'sh' | 'bash' | 'python3'>('bash')
   const [activeTaskRunId, setActiveTaskRunId] = useState<string | null>(null)
   const [cmdHistory, setCmdHistory] = useState<string[]>([])
-  const [cmdHistoryIdx, setCmdHistoryIdx] = useState<number>(-1)
+  const [cmdHistoryIdx, setCmdHistoryIdx] = useState(-1)
 
   const outputRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const isRunning = activeTaskRunId !== null
 
@@ -57,41 +56,52 @@ export function TerminalTab({ orgId, host, userId }: Props) {
     }
   }, [history])
 
-  // Focus input on mount and when run completes
+  // Focus input when run completes
   useEffect(() => {
-    if (!isRunning) {
-      inputRef.current?.focus()
-    }
+    if (!isRunning) inputRef.current?.focus()
   }, [isRunning])
 
-  // Poll the running task
-  const { data: currentRun } = useQuery({
-    queryKey: ['terminal-run', activeTaskRunId],
-    queryFn: () => getTaskRun(orgId, activeTaskRunId!),
-    enabled: activeTaskRunId !== null,
-    refetchInterval: activeTaskRunId ? 1_500 : false,
-  })
-
+  // Cleanup polling on unmount
   useEffect(() => {
-    if (!currentRun || !activeTaskRunId) return
-    const hostRow = currentRun.hosts[0]
-    if (!hostRow) return
-
-    const newStatus = entryStatus(hostRow.status)
-    const exitCode = hostRow.exitCode ?? null
-
-    setHistory((prev) =>
-      prev.map((entry) =>
-        entry.taskRunId === activeTaskRunId
-          ? { ...entry, output: hostRow.rawOutput, status: newStatus, exitCode }
-          : entry,
-      ),
-    )
-
-    if (isTerminalStatus(newStatus)) {
-      setActiveTaskRunId(null)
+    return () => {
+      if (pollingRef.current) clearInterval(pollingRef.current)
     }
-  }, [currentRun, activeTaskRunId])
+  }, [])
+
+  /**
+   * Start polling a task run. setState is called from the interval callback,
+   * not synchronously inside an effect — satisfies react-hooks/set-state-in-effect.
+   */
+  function startPolling(taskRunId: string) {
+    if (pollingRef.current) clearInterval(pollingRef.current)
+
+    pollingRef.current = setInterval(async () => {
+      const run = await getTaskRun(orgId, taskRunId)
+      if (!run) return
+
+      const hostRow = run.hosts[0]
+      if (!hostRow) return
+
+      const newStatus = hostStatusToEntry(hostRow.status)
+      const exitCode = hostRow.exitCode ?? null
+      const output = hostRow.rawOutput
+
+      // setState called in interval callback — this is the allowed pattern
+      setHistory((prev) =>
+        prev.map((entry) =>
+          entry.taskRunId === taskRunId
+            ? { ...entry, output, status: newStatus, exitCode }
+            : entry,
+        ),
+      )
+
+      if (isTerminal(newStatus)) {
+        clearInterval(pollingRef.current!)
+        pollingRef.current = null
+        setActiveTaskRunId(null)
+      }
+    }, 1_500)
+  }
 
   const runCommand = useCallback(async () => {
     const cmd = input.trim()
@@ -133,6 +143,8 @@ export function TerminalTab({ orgId, host, userId }: Props) {
       ),
     )
     setActiveTaskRunId(result.taskRunId)
+    startPolling(result.taskRunId)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [input, isRunning, orgId, userId, host.id, interpreter])
 
   async function handleCancel() {
@@ -165,11 +177,9 @@ export function TerminalTab({ orgId, host, userId }: Props) {
       setInput(nextIdx === -1 ? '' : (cmdHistory[nextIdx] ?? ''))
       return
     }
-    if (e.key === 'c' && e.ctrlKey) {
-      if (isRunning) {
-        e.preventDefault()
-        handleCancel()
-      }
+    if (e.key === 'c' && e.ctrlKey && isRunning) {
+      e.preventDefault()
+      handleCancel()
     }
   }
 
@@ -249,8 +259,8 @@ export function TerminalTab({ orgId, host, userId }: Props) {
               </pre>
             )}
 
-            {/* Exit code */}
-            {isTerminalStatus(entry.status) && entry.exitCode !== null && entry.exitCode !== 0 && (
+            {/* Exit code / cancelled */}
+            {isTerminal(entry.status) && entry.exitCode !== null && entry.exitCode !== 0 && (
               <p className="ml-4 mt-0.5 text-xs text-red-400">[exit: {entry.exitCode}]</p>
             )}
             {entry.status === 'cancelled' && (
