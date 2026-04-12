@@ -98,9 +98,17 @@ export function TerminalTab({ orgId, host }: Props) {
     const ws = new WebSocket(result.ingestWsUrl)
     wsRef.current = ws
 
+    // Track whether the agent has connected so we can show diagnostics
+    let agentDidConnect = false
+    const waitingTimer = setTimeout(() => {
+      if (!agentDidConnect) {
+        term.writeln('\x1b[33mWaiting for agent to start shell...\x1b[0m')
+      }
+    }, 5000)
+
     ws.onopen = () => {
       setStatus('connected')
-      term.writeln('\x1b[32mConnected.\x1b[0m\r\n')
+      term.writeln('\x1b[32mConnected to ingest. Waiting for agent...\x1b[0m')
       // Send initial size — fit has already run by now so cols/rows are correct
       fitAddon.fit()
       if (ws.readyState === WebSocket.OPEN) {
@@ -112,12 +120,22 @@ export function TerminalTab({ orgId, host }: Props) {
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data)
-        if (msg.type === 'output' && msg.data) {
+        if (msg.type === 'agent_connected') {
+          agentDidConnect = true
+          clearTimeout(waitingTimer)
+          term.writeln('\x1b[32mAgent connected. Starting shell...\x1b[0m\r\n')
+        } else if (msg.type === 'output' && msg.data) {
+          if (!agentDidConnect) {
+            agentDidConnect = true
+            clearTimeout(waitingTimer)
+          }
           term.write(atob(msg.data))
         } else if (msg.type === 'closed') {
+          clearTimeout(waitingTimer)
           term.writeln('\r\n\x1b[90mSession ended.\x1b[0m')
           setStatus('closed')
         } else if (msg.type === 'error' && msg.message) {
+          clearTimeout(waitingTimer)
           term.writeln('\r\n\x1b[31mError: ' + msg.message + '\x1b[0m')
           setStatus('error')
           setErrorMsg(msg.message)
@@ -168,6 +186,7 @@ export function TerminalTab({ orgId, host }: Props) {
 
     // Cleanup function
     cleanupRef.current = () => {
+      clearTimeout(waitingTimer)
       dataDisposable.dispose()
       resizeDisposable.dispose()
       resizeObserver?.disconnect()
