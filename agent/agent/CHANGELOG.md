@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.20.1](https://github.com/simonjcarr/infrawatch/compare/agent/v0.20.0...agent/v0.20.1) (2026-04-12)
+
+
+### Bug Fixes
+
+* **agent:** set TERM, HOME, and prefer bash for terminal PTY ([f094ac3](https://github.com/simonjcarr/infrawatch/commit/f094ac304638a58392c739cc043d838cdcebc099))
+* **agent:** set TERM, HOME, and prefer bash for terminal PTY ([ea9a899](https://github.com/simonjcarr/infrawatch/commit/ea9a899f226e0aff780d188da33a7fc20fec69c8))
+
 ## [0.20.0](https://github.com/simonjcarr/infrawatch/compare/agent/v0.19.0...agent/v0.20.0) (2026-04-12)
 
 
