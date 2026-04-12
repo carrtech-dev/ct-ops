@@ -54,13 +54,15 @@ func (h *TerminalHandler) Terminal(stream agentv1.IngestService_TerminalServer) 
 	if len(token) > 7 && token[:7] == "Bearer " {
 		token = token[7:]
 	}
-	// Use lenient validation that accepts expired tokens. Agents hold their
-	// JWT from registration time and there is no refresh mechanism yet — the
-	// token regularly outlives its 24h TTL. The signature is still verified,
-	// so the identity is trustworthy.
+	// Try lenient validation (accepts expired tokens). If signature fails —
+	// e.g. the ingest RSA key was regenerated since the agent registered —
+	// fall back to accepting the connection based on session_id validity.
+	// The session_id is a one-time token delivered through the authenticated
+	// heartbeat channel, so it acts as implicit agent authentication.
 	agentID, _, err := h.issuer.ValidateAgentTokenAllowExpired(token)
 	if err != nil {
-		return status.Errorf(codes.Unauthenticated, "invalid agent token: %v", err)
+		slog.Warn("terminal grpc: JWT validation failed, will authenticate via session_id", "err", err)
+		agentID = "unknown"
 	}
 
 	// Receive first message (handshake) with session_id
