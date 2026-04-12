@@ -60,12 +60,41 @@ import { listGroupsForHost, listGroups, addHostToGroup, removeHostFromGroup } fr
 import type { HostGroup } from '@/lib/db/schema'
 import type { HostGroupWithCount } from '@/lib/actions/host-groups'
 
+type ParentTabId = 'overview' | 'monitoring' | 'infrastructure' | 'management' | 'tools'
 type Tab = 'overview' | 'storage' | 'network' | 'metrics' | 'checks' | 'alerts' | 'users' | 'settings' | 'groups' | 'tasks' | 'terminal'
+
+const TAB_LABELS: Record<Tab, string> = {
+  overview: 'Overview',
+  storage: 'Storage',
+  network: 'Network',
+  metrics: 'Metrics',
+  checks: 'Checks',
+  alerts: 'Alerts',
+  users: 'Users',
+  settings: 'Settings',
+  groups: 'Groups',
+  tasks: 'Tasks',
+  terminal: 'Terminal',
+}
+
+const PARENT_TABS: Array<{
+  id: ParentTabId
+  label: string
+  defaultTab: Tab
+  children: Tab[] | null
+}> = [
+  { id: 'overview', label: 'Overview', defaultTab: 'overview', children: null },
+  { id: 'monitoring', label: 'Monitoring', defaultTab: 'metrics', children: ['metrics', 'checks', 'alerts'] },
+  { id: 'infrastructure', label: 'Infrastructure', defaultTab: 'storage', children: ['storage', 'network'] },
+  { id: 'management', label: 'Management', defaultTab: 'groups', children: ['users', 'groups', 'settings'] },
+  { id: 'tools', label: 'Tools', defaultTab: 'tasks', children: ['tasks', 'terminal'] },
+]
 
 interface Props {
   host: HostWithAgent
   orgId: string
   currentUserId: string
+  userRole: string
   latestAgentVersion: string
 }
 
@@ -182,7 +211,8 @@ function TabButton({ active, onClick, children }: { active: boolean; onClick: ()
   )
 }
 
-export function HostDetailClient({ host: initialHost, orgId, currentUserId, latestAgentVersion }: Props) {
+export function HostDetailClient({ host: initialHost, orgId, currentUserId, userRole, latestAgentVersion }: Props) {
+  const [activeParentTab, setActiveParentTab] = useState<ParentTabId>('overview')
   const [activeTab, setActiveTab] = useState<Tab>('overview')
   const [metricsRange, setMetricsRange] = useState<MetricsPreset>('24h')
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -395,64 +425,64 @@ export function HostDetailClient({ host: initialHost, orgId, currentUserId, late
         </p>
       </div>
 
-      {/* Tabs */}
+      {/* Parent tabs */}
       <div className="border-b flex gap-0">
-        <TabButton active={activeTab === 'overview'} onClick={() => setActiveTab('overview')}>
-          Overview
-        </TabButton>
-        <TabButton active={activeTab === 'storage'} onClick={() => setActiveTab('storage')}>
-          Storage
-          {disks.length > 0 && (
-            <span className="ml-1.5 text-xs bg-muted text-muted-foreground rounded-full px-1.5 py-0.5">
-              {disks.length}
-            </span>
-          )}
-        </TabButton>
-        <TabButton active={activeTab === 'network'} onClick={() => setActiveTab('network')}>
-          Network
-          {networkInterfaces.length > 0 && (
-            <span className="ml-1.5 text-xs bg-muted text-muted-foreground rounded-full px-1.5 py-0.5">
-              {networkInterfaces.length}
-            </span>
-          )}
-        </TabButton>
-        <TabButton active={activeTab === 'metrics'} onClick={() => setActiveTab('metrics')}>
-          Metrics
-        </TabButton>
-        <TabButton active={activeTab === 'checks'} onClick={() => setActiveTab('checks')}>
-          Checks
-        </TabButton>
-        <TabButton active={activeTab === 'alerts'} onClick={() => setActiveTab('alerts')}>
-          Alerts
-          {activeAlertCount > 0 && (
-            <span className="ml-1.5 text-xs bg-red-100 text-red-800 rounded-full px-1.5 py-0.5">
-              {activeAlertCount}
-            </span>
-          )}
-        </TabButton>
-        {collectionSettings?.localUsers && (
-          <TabButton active={activeTab === 'users'} onClick={() => setActiveTab('users')}>
-            Users
-            {localUserCount > 0 && (
-              <span className="ml-1.5 text-xs bg-muted text-muted-foreground rounded-full px-1.5 py-0.5">
-                {localUserCount}
+        {PARENT_TABS.map((parent) => (
+          <TabButton
+            key={parent.id}
+            active={activeParentTab === parent.id}
+            onClick={() => {
+              setActiveParentTab(parent.id)
+              setActiveTab(parent.defaultTab)
+            }}
+          >
+            {parent.label}
+            {parent.id === 'monitoring' && activeAlertCount > 0 && (
+              <span className="ml-1.5 text-xs bg-red-100 text-red-800 rounded-full px-1.5 py-0.5">
+                {activeAlertCount}
               </span>
             )}
           </TabButton>
-        )}
-        <TabButton active={activeTab === 'settings'} onClick={() => setActiveTab('settings')}>
-          Settings
-        </TabButton>
-        <TabButton active={activeTab === 'groups'} onClick={() => setActiveTab('groups')}>
-          Groups
-        </TabButton>
-        <TabButton active={activeTab === 'tasks'} onClick={() => setActiveTab('tasks')}>
-          Tasks
-        </TabButton>
-        <TabButton active={activeTab === 'terminal'} onClick={() => setActiveTab('terminal')}>
-          Terminal
-        </TabButton>
+        ))}
       </div>
+
+      {/* Child tabs */}
+      {PARENT_TABS.find((p) => p.id === activeParentTab)?.children && (
+        <div className="border-b flex gap-0 bg-muted/30 px-2">
+          {PARENT_TABS.find((p) => p.id === activeParentTab)!.children!.map((childTab) => {
+            if (childTab === 'users' && !collectionSettings?.localUsers) return null
+            return (
+              <TabButton
+                key={childTab}
+                active={activeTab === childTab}
+                onClick={() => setActiveTab(childTab)}
+              >
+                {TAB_LABELS[childTab]}
+                {childTab === 'storage' && disks.length > 0 && (
+                  <span className="ml-1.5 text-xs bg-muted text-muted-foreground rounded-full px-1.5 py-0.5">
+                    {disks.length}
+                  </span>
+                )}
+                {childTab === 'network' && networkInterfaces.length > 0 && (
+                  <span className="ml-1.5 text-xs bg-muted text-muted-foreground rounded-full px-1.5 py-0.5">
+                    {networkInterfaces.length}
+                  </span>
+                )}
+                {childTab === 'alerts' && activeAlertCount > 0 && (
+                  <span className="ml-1.5 text-xs bg-red-100 text-red-800 rounded-full px-1.5 py-0.5">
+                    {activeAlertCount}
+                  </span>
+                )}
+                {childTab === 'users' && localUserCount > 0 && (
+                  <span className="ml-1.5 text-xs bg-muted text-muted-foreground rounded-full px-1.5 py-0.5">
+                    {localUserCount}
+                  </span>
+                )}
+              </TabButton>
+            )
+          })}
+        </div>
+      )}
 
       {/* Overview Tab */}
       {activeTab === 'overview' && (
@@ -739,7 +769,7 @@ export function HostDetailClient({ host: initialHost, orgId, currentUserId, late
 
       {/* Settings Tab */}
       {activeTab === 'settings' && (
-        <SettingsTab orgId={orgId} hostId={initialHost.id} />
+        <SettingsTab orgId={orgId} hostId={initialHost.id} isAdmin={userRole === 'org_admin' || userRole === 'super_admin'} />
       )}
 
       {/* Groups Tab */}

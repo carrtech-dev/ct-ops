@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Settings, Users, Cpu, HardDrive, MemoryStick, Plus, X } from 'lucide-react'
+import { Settings, Users, Cpu, HardDrive, MemoryStick, Plus, X, TerminalSquare } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
@@ -10,22 +10,75 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { CheckCircle2 } from 'lucide-react'
 import { getHostCollectionSettings, updateHostCollectionSettings } from '@/lib/actions/host-settings'
+import { getHostTerminalSettings, updateHostTerminalSettings } from '@/lib/actions/terminal'
+import type { HostTerminalSettings } from '@/lib/actions/terminal'
+import { getOrgUsers } from '@/lib/actions/users'
 import type { HostCollectionSettings } from '@/lib/db/schema'
 
 interface SettingsTabProps {
   orgId: string
   hostId: string
+  isAdmin: boolean
 }
 
-export function SettingsTab({ orgId, hostId }: SettingsTabProps) {
+export function SettingsTab({ orgId, hostId, isAdmin }: SettingsTabProps) {
   const queryClient = useQueryClient()
   const [saveSuccess, setSaveSuccess] = useState(false)
   const [newUsername, setNewUsername] = useState('')
+
+  // Terminal settings state
+  const [terminalSaveSuccess, setTerminalSaveSuccess] = useState(false)
+  const [newAllowedUser, setNewAllowedUser] = useState('')
 
   const { data: settings, isLoading } = useQuery({
     queryKey: ['host-collection-settings', orgId, hostId],
     queryFn: () => getHostCollectionSettings(orgId, hostId),
   })
+
+  const { data: terminalSettings, isLoading: terminalLoading } = useQuery({
+    queryKey: ['host-terminal-settings', orgId, hostId],
+    queryFn: () => getHostTerminalSettings(orgId, hostId),
+  })
+
+  const { data: orgUsers } = useQuery({
+    queryKey: ['org-users', orgId],
+    queryFn: () => getOrgUsers(orgId),
+    enabled: isAdmin,
+  })
+
+  const [localTerminalSettings, setLocalTerminalSettings] = useState<HostTerminalSettings | null>(null)
+  const currentTerminalSettings = localTerminalSettings ?? terminalSettings
+
+  const terminalMutation = useMutation({
+    mutationFn: (s: HostTerminalSettings) => updateHostTerminalSettings(orgId, hostId, s),
+    onSuccess: (result) => {
+      if ('error' in result) return
+      setTerminalSaveSuccess(true)
+      setLocalTerminalSettings(null)
+      queryClient.invalidateQueries({ queryKey: ['host-terminal-settings', orgId, hostId] })
+      setTimeout(() => setTerminalSaveSuccess(false), 3000)
+    },
+  })
+
+  function updateTerminalSetting(patch: Partial<HostTerminalSettings>) {
+    const base = currentTerminalSettings ?? { terminalEnabled: true, terminalAllowedUsers: [] }
+    setLocalTerminalSettings({ ...base, ...patch })
+  }
+
+  function addAllowedUser(userId: string) {
+    if (!currentTerminalSettings) return
+    const existing = currentTerminalSettings.terminalAllowedUsers ?? []
+    if (existing.includes(userId)) return
+    updateTerminalSetting({ terminalAllowedUsers: [...existing, userId] })
+    setNewAllowedUser('')
+  }
+
+  function removeAllowedUser(userId: string) {
+    if (!currentTerminalSettings) return
+    updateTerminalSetting({
+      terminalAllowedUsers: (currentTerminalSettings.terminalAllowedUsers ?? []).filter((id) => id !== userId),
+    })
+  }
 
   const [localSettings, setLocalSettings] = useState<HostCollectionSettings | null>(null)
 
@@ -280,6 +333,120 @@ export function SettingsTab({ orgId, hostId }: SettingsTabProps) {
           </div>
         </CardContent>
       </Card>
+
+      {/* Terminal Access Card */}
+      {isAdmin && currentTerminalSettings && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <TerminalSquare className="size-4 text-muted-foreground" />
+              Terminal Access
+            </CardTitle>
+            <CardDescription>
+              Control terminal access for this host. These settings override the global organisation setting.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            {/* Enable/disable terminal */}
+            <div className="flex items-center justify-between">
+              <div>
+                <Label className="text-sm font-medium">Enable Terminal</Label>
+                <p className="text-xs text-muted-foreground">Allow users to open a terminal session on this host</p>
+              </div>
+              <Switch
+                checked={currentTerminalSettings.terminalEnabled}
+                onCheckedChange={(checked) => updateTerminalSetting({ terminalEnabled: checked })}
+              />
+            </div>
+
+            {/* User allowlist */}
+            {currentTerminalSettings.terminalEnabled && (
+              <div className="space-y-3">
+                <div>
+                  <Label className="text-sm font-medium">Allowed Users</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Restrict terminal access to specific users. Leave empty to allow all users with sufficient role.
+                  </p>
+                </div>
+
+                {/* User select */}
+                {orgUsers && (
+                  <div className="flex gap-2">
+                    <select
+                      value={newAllowedUser}
+                      onChange={(e) => setNewAllowedUser(e.target.value)}
+                      className="flex h-9 rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring max-w-xs"
+                    >
+                      <option value="">Select a user...</option>
+                      {orgUsers.members
+                        .filter((u) => !(currentTerminalSettings.terminalAllowedUsers ?? []).includes(u.id))
+                        .filter((u) => u.role !== 'agent')
+                        .map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.name} ({u.email})
+                          </option>
+                        ))}
+                    </select>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => newAllowedUser && addAllowedUser(newAllowedUser)}
+                      disabled={!newAllowedUser}
+                    >
+                      <Plus className="size-4" />
+                    </Button>
+                  </div>
+                )}
+
+                {/* Current allowlist */}
+                <div className="flex flex-wrap gap-2">
+                  {(currentTerminalSettings.terminalAllowedUsers ?? []).map((userId) => {
+                    const user = orgUsers?.members.find((u) => u.id === userId)
+                    return (
+                      <span
+                        key={userId}
+                        className="inline-flex items-center gap-1 rounded-md border bg-muted px-2 py-1 text-sm"
+                      >
+                        {user ? `${user.name} (${user.email})` : userId}
+                        <button
+                          onClick={() => removeAllowedUser(userId)}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </span>
+                    )
+                  })}
+                  {(currentTerminalSettings.terminalAllowedUsers ?? []).length === 0 && (
+                    <p className="text-sm text-muted-foreground">No restrictions — all eligible users can access.</p>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Terminal Save */}
+            <div className="flex items-center gap-3 pt-2 border-t">
+              <Button
+                size="sm"
+                disabled={localTerminalSettings === null || terminalMutation.isPending}
+                onClick={() => currentTerminalSettings && terminalMutation.mutate(currentTerminalSettings)}
+              >
+                {terminalMutation.isPending ? 'Saving...' : 'Save'}
+              </Button>
+              {terminalSaveSuccess && (
+                <span className="flex items-center gap-1 text-sm text-green-700">
+                  <CheckCircle2 className="size-4" />
+                  Saved
+                </span>
+              )}
+              {terminalMutation.isError && (
+                <span className="text-sm text-destructive">Failed to save settings</span>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   )
 }

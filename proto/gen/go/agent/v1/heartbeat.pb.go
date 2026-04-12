@@ -945,19 +945,21 @@ func (x *HeartbeatRequest) GetTaskResults() []*AgentTaskResult {
 }
 
 type HeartbeatResponse struct {
-	state           protoimpl.MessageState `protogen:"open.v1"`
-	Ok              bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
-	Command         string                 `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"` // server-push command type (empty = no command)
-	CommandPayload  []byte                 `protobuf:"bytes,3,opt,name=command_payload,json=commandPayload,proto3" json:"command_payload,omitempty"`
-	LatestVersion   string                 `protobuf:"bytes,4,opt,name=latest_version,json=latestVersion,proto3" json:"latest_version,omitempty"`        // latest known agent version
-	UpdateAvailable bool                   `protobuf:"varint,5,opt,name=update_available,json=updateAvailable,proto3" json:"update_available,omitempty"` // true when agent_version != latest_version
-	DownloadUrl     string                 `protobuf:"bytes,6,opt,name=download_url,json=downloadUrl,proto3" json:"download_url,omitempty"`              // base URL to fetch the updated binary from
-	Checks          []*CheckDefinition     `protobuf:"bytes,7,rep,name=checks,proto3" json:"checks,omitempty"`
-	PendingQueries  []*AgentQuery          `protobuf:"bytes,8,rep,name=pending_queries,json=pendingQueries,proto3" json:"pending_queries,omitempty"`
-	PendingTask     *AgentTask             `protobuf:"bytes,9,opt,name=pending_task,json=pendingTask,proto3" json:"pending_task,omitempty"`          // current pending task (one at a time; absent = none)
-	CancelTaskIds   []string               `protobuf:"bytes,10,rep,name=cancel_task_ids,json=cancelTaskIds,proto3" json:"cancel_task_ids,omitempty"` // task_run_hosts.id values the agent must cancel immediately
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	state                   protoimpl.MessageState    `protogen:"open.v1"`
+	Ok                      bool                      `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	Command                 string                    `protobuf:"bytes,2,opt,name=command,proto3" json:"command,omitempty"` // server-push command type (empty = no command)
+	CommandPayload          []byte                    `protobuf:"bytes,3,opt,name=command_payload,json=commandPayload,proto3" json:"command_payload,omitempty"`
+	LatestVersion           string                    `protobuf:"bytes,4,opt,name=latest_version,json=latestVersion,proto3" json:"latest_version,omitempty"`        // latest known agent version
+	UpdateAvailable         bool                      `protobuf:"varint,5,opt,name=update_available,json=updateAvailable,proto3" json:"update_available,omitempty"` // true when agent_version != latest_version
+	DownloadUrl             string                    `protobuf:"bytes,6,opt,name=download_url,json=downloadUrl,proto3" json:"download_url,omitempty"`              // base URL to fetch the updated binary from
+	Checks                  []*CheckDefinition        `protobuf:"bytes,7,rep,name=checks,proto3" json:"checks,omitempty"`
+	PendingQueries          []*AgentQuery             `protobuf:"bytes,8,rep,name=pending_queries,json=pendingQueries,proto3" json:"pending_queries,omitempty"`
+	PendingTask             *AgentTask                `protobuf:"bytes,9,opt,name=pending_task,json=pendingTask,proto3" json:"pending_task,omitempty"`                                        // current pending task (one at a time; absent = none)
+	CancelTaskIds           []string                  `protobuf:"bytes,10,rep,name=cancel_task_ids,json=cancelTaskIds,proto3" json:"cancel_task_ids,omitempty"`                               // task_run_hosts.id values the agent must cancel immediately
+	PendingTerminalSessions []*TerminalSessionRequest `protobuf:"bytes,11,rep,name=pending_terminal_sessions,json=pendingTerminalSessions,proto3" json:"pending_terminal_sessions,omitempty"` // terminal sessions to open
+	CancelTerminalSessions  []string                  `protobuf:"bytes,12,rep,name=cancel_terminal_sessions,json=cancelTerminalSessions,proto3" json:"cancel_terminal_sessions,omitempty"`    // terminal sessions to close
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *HeartbeatResponse) Reset() {
@@ -1060,11 +1062,25 @@ func (x *HeartbeatResponse) GetCancelTaskIds() []string {
 	return nil
 }
 
+func (x *HeartbeatResponse) GetPendingTerminalSessions() []*TerminalSessionRequest {
+	if x != nil {
+		return x.PendingTerminalSessions
+	}
+	return nil
+}
+
+func (x *HeartbeatResponse) GetCancelTerminalSessions() []string {
+	if x != nil {
+		return x.CancelTerminalSessions
+	}
+	return nil
+}
+
 var File_agent_v1_heartbeat_proto protoreflect.FileDescriptor
 
 const file_agent_v1_heartbeat_proto_rawDesc = "" +
 	"\n" +
-	"\x18agent/v1/heartbeat.proto\x12\bagent.v1\"\xde\x01\n" +
+	"\x18agent/v1/heartbeat.proto\x12\bagent.v1\x1a\x17agent/v1/terminal.proto\"\xde\x01\n" +
 	"\bDiskInfo\x12\x1f\n" +
 	"\vmount_point\x18\x01 \x01(\tR\n" +
 	"mountPoint\x12\x16\n" +
@@ -1154,7 +1170,7 @@ const file_agent_v1_heartbeat_proto_rawDesc = "" +
 	"\rcheck_results\x18\r \x03(\v2\x15.agent.v1.CheckResultR\fcheckResults\x12?\n" +
 	"\rquery_results\x18\x0e \x03(\v2\x1a.agent.v1.AgentQueryResultR\fqueryResults\x12@\n" +
 	"\rtask_progress\x18\x0f \x03(\v2\x1b.agent.v1.AgentTaskProgressR\ftaskProgress\x12<\n" +
-	"\ftask_results\x18\x10 \x03(\v2\x19.agent.v1.AgentTaskResultR\vtaskResults\"\xad\x03\n" +
+	"\ftask_results\x18\x10 \x03(\v2\x19.agent.v1.AgentTaskResultR\vtaskResults\"\xc5\x04\n" +
 	"\x11HeartbeatResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12'\n" +
@@ -1166,7 +1182,9 @@ const file_agent_v1_heartbeat_proto_rawDesc = "" +
 	"\x0fpending_queries\x18\b \x03(\v2\x14.agent.v1.AgentQueryR\x0ependingQueries\x126\n" +
 	"\fpending_task\x18\t \x01(\v2\x13.agent.v1.AgentTaskR\vpendingTask\x12&\n" +
 	"\x0fcancel_task_ids\x18\n" +
-	" \x03(\tR\rcancelTaskIdsB.Z,github.com/infrawatch/proto/agent/v1;agentv1b\x06proto3"
+	" \x03(\tR\rcancelTaskIds\x12\\\n" +
+	"\x19pending_terminal_sessions\x18\v \x03(\v2 .agent.v1.TerminalSessionRequestR\x17pendingTerminalSessions\x128\n" +
+	"\x18cancel_terminal_sessions\x18\f \x03(\tR\x16cancelTerminalSessionsB.Z,github.com/infrawatch/proto/agent/v1;agentv1b\x06proto3"
 
 var (
 	file_agent_v1_heartbeat_proto_rawDescOnce sync.Once
@@ -1182,19 +1200,20 @@ func file_agent_v1_heartbeat_proto_rawDescGZIP() []byte {
 
 var file_agent_v1_heartbeat_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_agent_v1_heartbeat_proto_goTypes = []any{
-	(*DiskInfo)(nil),          // 0: agent.v1.DiskInfo
-	(*NetworkInterface)(nil),  // 1: agent.v1.NetworkInterface
-	(*CheckDefinition)(nil),   // 2: agent.v1.CheckDefinition
-	(*CheckResult)(nil),       // 3: agent.v1.CheckResult
-	(*AgentQuery)(nil),        // 4: agent.v1.AgentQuery
-	(*PortInfo)(nil),          // 5: agent.v1.PortInfo
-	(*ServiceInfo)(nil),       // 6: agent.v1.ServiceInfo
-	(*AgentQueryResult)(nil),  // 7: agent.v1.AgentQueryResult
-	(*AgentTask)(nil),         // 8: agent.v1.AgentTask
-	(*AgentTaskProgress)(nil), // 9: agent.v1.AgentTaskProgress
-	(*AgentTaskResult)(nil),   // 10: agent.v1.AgentTaskResult
-	(*HeartbeatRequest)(nil),  // 11: agent.v1.HeartbeatRequest
-	(*HeartbeatResponse)(nil), // 12: agent.v1.HeartbeatResponse
+	(*DiskInfo)(nil),               // 0: agent.v1.DiskInfo
+	(*NetworkInterface)(nil),       // 1: agent.v1.NetworkInterface
+	(*CheckDefinition)(nil),        // 2: agent.v1.CheckDefinition
+	(*CheckResult)(nil),            // 3: agent.v1.CheckResult
+	(*AgentQuery)(nil),             // 4: agent.v1.AgentQuery
+	(*PortInfo)(nil),               // 5: agent.v1.PortInfo
+	(*ServiceInfo)(nil),            // 6: agent.v1.ServiceInfo
+	(*AgentQueryResult)(nil),       // 7: agent.v1.AgentQueryResult
+	(*AgentTask)(nil),              // 8: agent.v1.AgentTask
+	(*AgentTaskProgress)(nil),      // 9: agent.v1.AgentTaskProgress
+	(*AgentTaskResult)(nil),        // 10: agent.v1.AgentTaskResult
+	(*HeartbeatRequest)(nil),       // 11: agent.v1.HeartbeatRequest
+	(*HeartbeatResponse)(nil),      // 12: agent.v1.HeartbeatResponse
+	(*TerminalSessionRequest)(nil), // 13: agent.v1.TerminalSessionRequest
 }
 var file_agent_v1_heartbeat_proto_depIdxs = []int32{
 	5,  // 0: agent.v1.AgentQueryResult.ports:type_name -> agent.v1.PortInfo
@@ -1208,11 +1227,12 @@ var file_agent_v1_heartbeat_proto_depIdxs = []int32{
 	2,  // 8: agent.v1.HeartbeatResponse.checks:type_name -> agent.v1.CheckDefinition
 	4,  // 9: agent.v1.HeartbeatResponse.pending_queries:type_name -> agent.v1.AgentQuery
 	8,  // 10: agent.v1.HeartbeatResponse.pending_task:type_name -> agent.v1.AgentTask
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	13, // 11: agent.v1.HeartbeatResponse.pending_terminal_sessions:type_name -> agent.v1.TerminalSessionRequest
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_agent_v1_heartbeat_proto_init() }
@@ -1220,6 +1240,7 @@ func file_agent_v1_heartbeat_proto_init() {
 	if File_agent_v1_heartbeat_proto != nil {
 		return
 	}
+	file_agent_v1_terminal_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

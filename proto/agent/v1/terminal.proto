@@ -1,0 +1,45 @@
+syntax = "proto3";
+
+package agent.v1;
+
+option go_package = "github.com/infrawatch/proto/agent/v1;agentv1";
+
+// TerminalSessionRequest is pushed server→agent via HeartbeatResponse to
+// instruct the agent to open a PTY session and connect back via the
+// Terminal RPC stream.
+message TerminalSessionRequest {
+  string session_id = 1;
+  uint32 cols       = 2;
+  uint32 rows       = 3;
+}
+
+message TerminalResizeMsg {
+  uint32 cols = 1;
+  uint32 rows = 2;
+}
+
+message TerminalClosedMsg {
+  int32 exit_code = 1;
+}
+
+// TerminalAgentMessage is sent agent→server on the Terminal stream.
+// The first message carries only session_id (handshake); subsequent messages
+// carry PTY output or a closed signal.
+message TerminalAgentMessage {
+  string session_id = 1;
+  oneof payload {
+    bytes             output = 2;  // PTY stdout/stderr → browser
+    TerminalClosedMsg closed = 3;  // shell exited
+  }
+}
+
+// TerminalServerMessage is sent server→agent on the Terminal stream.
+// Carries browser keystrokes, resize events, or a close request.
+message TerminalServerMessage {
+  string session_id = 1;
+  oneof payload {
+    bytes             input  = 2;  // browser keystrokes → PTY stdin
+    TerminalResizeMsg resize = 3;  // terminal resize
+    bool              close  = 4;  // browser disconnected
+  }
+}

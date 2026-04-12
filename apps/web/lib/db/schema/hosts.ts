@@ -42,6 +42,8 @@ export interface HostMetadata {
   disks: DiskInfo[]
   network_interfaces: NetworkInterface[]
   collectionSettings?: HostCollectionSettings
+  terminalEnabled?: boolean
+  terminalAllowedUsers?: string[]
 }
 
 export const hosts = pgTable('hosts', {

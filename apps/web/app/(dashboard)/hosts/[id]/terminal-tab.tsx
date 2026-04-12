@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Loader2, X, Trash2 } from 'lucide-react'
+import { Loader2, AlertCircle, PlugZap, Unplug } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { triggerCustomScriptRun, cancelTaskRun, getTaskRun } from '@/lib/actions/task-runs'
+import { createTerminalSession } from '@/lib/actions/terminal'
 import type { HostWithAgent } from '@/lib/actions/agents'
 
 interface Props {
@@ -12,176 +12,176 @@ interface Props {
   userId: string
 }
 
-interface TerminalEntry {
-  id: string
-  command: string
-  taskRunId: string | null
-  output: string
-  status: 'creating' | 'running' | 'success' | 'failed' | 'cancelled' | 'cancelling'
-  exitCode: number | null
-}
+type Status = 'idle' | 'connecting' | 'connected' | 'error' | 'closed'
 
-function hostStatusToEntry(hostStatus: string): TerminalEntry['status'] {
-  switch (hostStatus) {
-    case 'success': return 'success'
-    case 'failed': return 'failed'
-    case 'cancelled': return 'cancelled'
-    case 'cancelling': return 'cancelling'
-    default: return 'running'
-  }
-}
+export function TerminalTab({ orgId, host }: Props) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const termRef = useRef<unknown>(null)
+  const fitRef = useRef<unknown>(null)
+  const wsRef = useRef<WebSocket | null>(null)
+  const cleanupRef = useRef<(() => void) | null>(null)
+  const [status, setStatus] = useState<Status>('idle')
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
 
-function isTerminal(status: TerminalEntry['status']): boolean {
-  return status === 'success' || status === 'failed' || status === 'cancelled'
-}
-
-export function TerminalTab({ orgId, host, userId }: Props) {
-  const [history, setHistory] = useState<TerminalEntry[]>([])
-  const [input, setInput] = useState('')
-  const [interpreter, setInterpreter] = useState<'sh' | 'bash' | 'python3'>('bash')
-  const [activeTaskRunId, setActiveTaskRunId] = useState<string | null>(null)
-  const [cmdHistory, setCmdHistory] = useState<string[]>([])
-  const [cmdHistoryIdx, setCmdHistoryIdx] = useState(-1)
-
-  const outputRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
-
-  const isRunning = activeTaskRunId !== null
-
-  // Auto-scroll to bottom when history changes
-  useEffect(() => {
-    if (outputRef.current) {
-      outputRef.current.scrollTop = outputRef.current.scrollHeight
-    }
-  }, [history])
-
-  // Focus input when run completes
-  useEffect(() => {
-    if (!isRunning) inputRef.current?.focus()
-  }, [isRunning])
-
-  // Cleanup polling on unmount
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (pollingRef.current) clearInterval(pollingRef.current)
+      cleanupRef.current?.()
     }
   }, [])
 
-  /**
-   * Start polling a task run. setState is called from the interval callback,
-   * not synchronously inside an effect — satisfies react-hooks/set-state-in-effect.
-   */
-  function startPolling(taskRunId: string) {
-    if (pollingRef.current) clearInterval(pollingRef.current)
+  const connect = useCallback(async () => {
+    // Clean up previous session
+    cleanupRef.current?.()
+    cleanupRef.current = null
 
-    pollingRef.current = setInterval(async () => {
-      const run = await getTaskRun(orgId, taskRunId)
-      if (!run) return
+    setStatus('connecting')
+    setErrorMsg(null)
 
-      const hostRow = run.hosts[0]
-      if (!hostRow) return
-
-      const newStatus = hostStatusToEntry(hostRow.status)
-      const exitCode = hostRow.exitCode ?? null
-      const output = hostRow.rawOutput
-
-      // setState called in interval callback — this is the allowed pattern
-      setHistory((prev) =>
-        prev.map((entry) =>
-          entry.taskRunId === taskRunId
-            ? { ...entry, output, status: newStatus, exitCode }
-            : entry,
-        ),
-      )
-
-      if (isTerminal(newStatus)) {
-        clearInterval(pollingRef.current!)
-        pollingRef.current = null
-        setActiveTaskRunId(null)
-      }
-    }, 1_500)
-  }
-
-  const runCommand = useCallback(async () => {
-    const cmd = input.trim()
-    if (!cmd || isRunning) return
-
-    const entryId = crypto.randomUUID()
-    const newEntry: TerminalEntry = {
-      id: entryId,
-      command: cmd,
-      taskRunId: null,
-      output: '',
-      status: 'creating',
-      exitCode: null,
-    }
-
-    setHistory((prev) => [...prev, newEntry])
-    setCmdHistory((prev) => [cmd, ...prev.filter((c) => c !== cmd)])
-    setCmdHistoryIdx(-1)
-    setInput('')
-
-    const result = await triggerCustomScriptRun(orgId, userId, host.id, cmd, interpreter)
-
+    // Create session via server action (access control + DB record)
+    const result = await createTerminalSession(orgId, host.id)
     if ('error' in result) {
-      setHistory((prev) =>
-        prev.map((e) =>
-          e.id === entryId
-            ? { ...e, status: 'failed', output: `error: ${result.error}` }
-            : e,
-        ),
-      )
+      setStatus('error')
+      setErrorMsg(result.error)
       return
     }
 
-    setHistory((prev) =>
-      prev.map((e) =>
-        e.id === entryId
-          ? { ...e, taskRunId: result.taskRunId, status: 'running' }
-          : e,
-      ),
-    )
-    setActiveTaskRunId(result.taskRunId)
-    startPolling(result.taskRunId)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input, isRunning, orgId, userId, host.id, interpreter])
+    // Dynamic import xterm.js (not SSR-safe)
+    const [{ Terminal }, { FitAddon }, { WebLinksAddon }] = await Promise.all([
+      import('@xterm/xterm'),
+      import('@xterm/addon-fit'),
+      import('@xterm/addon-web-links'),
+    ])
 
-  async function handleCancel() {
-    if (!activeTaskRunId) return
-    await cancelTaskRun(orgId, activeTaskRunId)
-    setHistory((prev) =>
-      prev.map((e) =>
-        e.taskRunId === activeTaskRunId ? { ...e, status: 'cancelling' } : e,
-      ),
-    )
-  }
+    // Also import xterm CSS dynamically
+    await import('@xterm/xterm/css/xterm.css')
 
-  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      runCommand()
+    if (!containerRef.current) {
+      setStatus('error')
+      setErrorMsg('Terminal container not found')
       return
     }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault()
-      const nextIdx = Math.min(cmdHistoryIdx + 1, cmdHistory.length - 1)
-      setCmdHistoryIdx(nextIdx)
-      setInput(cmdHistory[nextIdx] ?? '')
-      return
+
+    // Clear container from any previous session
+    containerRef.current.innerHTML = ''
+
+    // Init xterm.js
+    const term = new Terminal({
+      cursorBlink: true,
+      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+      fontSize: 13,
+      theme: {
+        background: '#09090b',
+        foreground: '#e4e4e7',
+        cursor: '#22c55e',
+        selectionBackground: '#27272a',
+      },
+    })
+    const fitAddon = new FitAddon()
+    const webLinksAddon = new WebLinksAddon()
+    term.loadAddon(fitAddon)
+    term.loadAddon(webLinksAddon)
+    term.open(containerRef.current)
+    fitAddon.fit()
+    termRef.current = term
+    fitRef.current = fitAddon
+
+    term.writeln('\x1b[90mConnecting to ' + (host.displayName ?? host.hostname) + '...\x1b[0m')
+
+    // Open WebSocket to ingest
+    const ws = new WebSocket(result.ingestWsUrl)
+    wsRef.current = ws
+
+    ws.onopen = () => {
+      setStatus('connected')
+      term.writeln('\x1b[32mConnected.\x1b[0m\r\n')
+      // Send initial size
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }))
+      }
+      term.focus()
     }
-    if (e.key === 'ArrowDown') {
-      e.preventDefault()
-      const nextIdx = Math.max(cmdHistoryIdx - 1, -1)
-      setCmdHistoryIdx(nextIdx)
-      setInput(nextIdx === -1 ? '' : (cmdHistory[nextIdx] ?? ''))
-      return
+
+    ws.onmessage = (e) => {
+      try {
+        const msg = JSON.parse(e.data)
+        if (msg.type === 'output' && msg.data) {
+          term.write(atob(msg.data))
+        } else if (msg.type === 'closed') {
+          term.writeln('\r\n\x1b[90mSession ended.\x1b[0m')
+          setStatus('closed')
+        } else if (msg.type === 'error' && msg.message) {
+          term.writeln('\r\n\x1b[31mError: ' + msg.message + '\x1b[0m')
+          setStatus('error')
+          setErrorMsg(msg.message)
+        }
+      } catch {
+        // ignore malformed messages
+      }
     }
-    if (e.key === 'c' && e.ctrlKey && isRunning) {
-      e.preventDefault()
-      handleCancel()
+
+    ws.onerror = () => {
+      setStatus('error')
+      setErrorMsg('WebSocket connection error')
     }
-  }
+
+    ws.onclose = (e) => {
+      if (e.code !== 1000) {
+        // Abnormal close
+        setStatus((prev) => (prev === 'error' ? prev : 'closed'))
+      }
+    }
+
+    // Forward keystrokes to server
+    const dataDisposable = term.onData((data) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'input', data: btoa(data) }))
+      }
+    })
+
+    // Handle resize
+    const resizeDisposable = term.onResize(({ cols, rows }) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'resize', cols, rows }))
+      }
+    })
+
+    // Observe container resizes and refit terminal
+    let resizeObserver: ResizeObserver | null = null
+    if (containerRef.current) {
+      resizeObserver = new ResizeObserver(() => {
+        try {
+          fitAddon.fit()
+        } catch {
+          // ignore errors during cleanup
+        }
+      })
+      resizeObserver.observe(containerRef.current)
+    }
+
+    // Cleanup function
+    cleanupRef.current = () => {
+      dataDisposable.dispose()
+      resizeDisposable.dispose()
+      resizeObserver?.disconnect()
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.send(JSON.stringify({ type: 'close' }))
+        ws.close(1000, 'user disconnected')
+      }
+      term.dispose()
+      termRef.current = null
+      fitRef.current = null
+      wsRef.current = null
+    }
+  }, [orgId, host.id, host.displayName, host.hostname])
+
+  const disconnect = useCallback(() => {
+    cleanupRef.current?.()
+    cleanupRef.current = null
+    setStatus('closed')
+  }, [])
+
+  const showTerminal = status === 'connected' || status === 'closed'
 
   return (
     <div className="space-y-3">
@@ -190,117 +190,79 @@ export function TerminalTab({ orgId, host, userId }: Props) {
         <div>
           <h3 className="text-base font-semibold text-foreground">Terminal</h3>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Run commands on this host sequentially.
+            Interactive shell on {host.displayName ?? host.hostname}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Interpreter selector */}
-          <div className="flex gap-1">
-            {(['sh', 'bash', 'python3'] as const).map((i) => (
-              <button
-                key={i}
-                onClick={() => setInterpreter(i)}
-                disabled={isRunning}
-                className={`rounded-md border px-2.5 py-1 text-xs font-mono transition-colors ${
-                  interpreter === i
-                    ? 'border-primary bg-primary/5 text-foreground font-semibold'
-                    : 'border-border text-muted-foreground hover:border-muted-foreground/40'
-                }`}
-              >
-                {i}
-              </button>
-            ))}
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setHistory([])}
-            disabled={history.length === 0}
-          >
-            <Trash2 className="size-3.5 mr-1.5" />
-            Clear
-          </Button>
-        </div>
-      </div>
-
-      {/* Terminal output */}
-      <div
-        ref={outputRef}
-        className="rounded-lg bg-zinc-950 text-zinc-100 font-mono text-sm p-4 min-h-96 max-h-[600px] overflow-y-auto space-y-3 cursor-text"
-        onClick={() => inputRef.current?.focus()}
-      >
-        {history.length === 0 && (
-          <p className="text-zinc-500 text-xs">
-            Type a command and press Enter to run it on {host.displayName ?? host.hostname}.
-          </p>
-        )}
-
-        {history.map((entry) => (
-          <div key={entry.id}>
-            {/* Command line */}
-            <div className="flex items-center gap-2">
-              <span className="text-green-400 select-none">$</span>
-              <span className="text-zinc-100">{entry.command}</span>
-              {entry.status === 'creating' && (
-                <Loader2 className="size-3 animate-spin text-zinc-400 ml-1" />
-              )}
-              {entry.status === 'running' && (
-                <Loader2 className="size-3 animate-spin text-blue-400 ml-1" />
-              )}
-              {entry.status === 'cancelling' && (
-                <span className="text-xs text-amber-400 ml-1">cancelling…</span>
-              )}
-            </div>
-
-            {/* Output */}
-            {entry.output && (
-              <pre className="mt-1 ml-4 text-zinc-300 text-xs whitespace-pre-wrap break-words leading-relaxed">
-                {entry.output}
-              </pre>
-            )}
-
-            {/* Exit code / cancelled */}
-            {isTerminal(entry.status) && entry.exitCode !== null && entry.exitCode !== 0 && (
-              <p className="ml-4 mt-0.5 text-xs text-red-400">[exit: {entry.exitCode}]</p>
-            )}
-            {entry.status === 'cancelled' && (
-              <p className="ml-4 mt-0.5 text-xs text-amber-400">[cancelled]</p>
-            )}
-          </div>
-        ))}
-
-        {/* Input line */}
-        <div className="flex items-center gap-2">
-          <span className="text-green-400 select-none">$</span>
-          <input
-            ref={inputRef}
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={isRunning}
-            placeholder={isRunning ? 'Running… (Ctrl+C to cancel)' : ''}
-            className="flex-1 bg-transparent outline-none text-zinc-100 placeholder:text-zinc-600 caret-green-400 disabled:opacity-50"
-            spellCheck={false}
-            autoComplete="off"
-            autoCorrect="off"
-            autoCapitalize="off"
-          />
-          {isRunning && (
-            <button
-              onClick={handleCancel}
-              className="text-zinc-500 hover:text-zinc-300 transition-colors"
-              title="Cancel (Ctrl+C)"
-            >
-              <X className="size-3.5" />
-            </button>
+          {status === 'connected' && (
+            <Button variant="outline" size="sm" onClick={disconnect}>
+              <Unplug className="size-3.5 mr-1.5" />
+              Disconnect
+            </Button>
+          )}
+          {(status === 'idle' || status === 'closed' || status === 'error') && (
+            <Button size="sm" onClick={connect}>
+              <PlugZap className="size-3.5 mr-1.5" />
+              {status === 'idle' ? 'Connect' : 'Reconnect'}
+            </Button>
+          )}
+          {status === 'connecting' && (
+            <Button size="sm" disabled>
+              <Loader2 className="size-3.5 mr-1.5 animate-spin" />
+              Connecting...
+            </Button>
           )}
         </div>
       </div>
 
-      <p className="text-xs text-muted-foreground">
-        Up/Down arrows recall command history · Ctrl+C cancels the running command · Each command creates a task run visible in the Tasks tab
-      </p>
+      {/* Error message */}
+      {errorMsg && (
+        <div className="flex items-center gap-2 text-sm text-destructive bg-destructive/5 rounded-md px-3 py-2 border border-destructive/20">
+          <AlertCircle className="size-4 shrink-0" />
+          {errorMsg}
+        </div>
+      )}
+
+      {/* Terminal container - always rendered so xterm can attach */}
+      <div
+        ref={containerRef}
+        className="rounded-lg overflow-hidden bg-zinc-950 border border-border"
+        style={{
+          height: '500px',
+          display: showTerminal ? 'block' : 'none',
+          padding: '4px',
+        }}
+      />
+
+      {/* Placeholder states */}
+      {!showTerminal && !errorMsg && (
+        <div className="rounded-lg bg-zinc-950 border border-border flex items-center justify-center" style={{ height: '500px' }}>
+          {status === 'idle' && (
+            <p className="text-zinc-500 text-sm">Click Connect to start a terminal session</p>
+          )}
+          {status === 'connecting' && (
+            <div className="flex items-center gap-2 text-zinc-400">
+              <Loader2 className="size-5 animate-spin" />
+              <span className="text-sm">Establishing connection...</span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Status bar */}
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <div className={`size-2 rounded-full ${
+          status === 'connected' ? 'bg-green-500' :
+          status === 'connecting' ? 'bg-amber-500 animate-pulse' :
+          status === 'error' ? 'bg-red-500' :
+          'bg-zinc-500'
+        }`} />
+        {status === 'connected' && 'Connected'}
+        {status === 'idle' && 'Not connected'}
+        {status === 'connecting' && 'Connecting...'}
+        {status === 'closed' && 'Disconnected'}
+        {status === 'error' && 'Connection error'}
+      </div>
     </div>
   )
 }

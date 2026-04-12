@@ -1,0 +1,157 @@
+//go:build !windows
+
+package terminal
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/exec"
+
+	"github.com/creack/pty"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
+
+	agentv1 "github.com/infrawatch/proto/agent/v1"
+)
+
+// OpenSession opens a Terminal gRPC stream to the ingest service, creates a
+// PTY running the user's shell, and bridges bytes between the PTY and the
+// gRPC stream in real-time.
+//
+// dialFunc creates a fresh gRPC connection. jwtToken is passed as gRPC
+// metadata for authentication. req contains the session ID and initial
+// terminal dimensions.
+//
+// This function blocks until the PTY exits or the stream is closed.
+func OpenSession(dialFunc func() (*grpc.ClientConn, error), jwtToken string, req *agentv1.TerminalSessionRequest) error {
+	sessionID := req.SessionId
+	slog.Info("opening terminal session", "session_id", sessionID, "cols", req.Cols, "rows", req.Rows)
+
+	// Dial ingest
+	conn, err := dialFunc()
+	if err != nil {
+		return fmt.Errorf("terminal dial: %w", err)
+	}
+	defer conn.Close()
+
+	// Attach JWT as gRPC metadata. Use background context — terminal sessions
+	// are independent of heartbeat and should not be cancelled when the
+	// heartbeat stream reconnects.
+	md := metadata.Pairs("authorization", "Bearer "+jwtToken)
+	ctx := metadata.NewOutgoingContext(context.Background(), md)
+
+	client := agentv1.NewIngestServiceClient(conn)
+	stream, err := client.Terminal(ctx)
+	if err != nil {
+		return fmt.Errorf("terminal stream open: %w", err)
+	}
+
+	// Send handshake message with session ID
+	if err := stream.Send(&agentv1.TerminalAgentMessage{SessionId: sessionID}); err != nil {
+		return fmt.Errorf("terminal handshake send: %w", err)
+	}
+
+	// Detect shell
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+
+	// Start PTY
+	cmd := exec.Command(shell)
+	cmd.Env = os.Environ()
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
+		Cols: uint16(req.Cols),
+		Rows: uint16(req.Rows),
+	})
+	if err != nil {
+		stream.Send(&agentv1.TerminalAgentMessage{
+			SessionId: sessionID,
+			Payload:   &agentv1.TerminalAgentMessage_Closed{Closed: &agentv1.TerminalClosedMsg{ExitCode: -1}},
+		})
+		return fmt.Errorf("terminal pty start: %w", err)
+	}
+	defer ptmx.Close()
+
+	slog.Info("terminal PTY started", "session_id", sessionID, "shell", shell)
+
+	// Goroutine: read PTY output → send to ingest via gRPC stream
+	ptyDone := make(chan struct{})
+	go func() {
+		defer close(ptyDone)
+		buf := make([]byte, 4096)
+		for {
+			n, err := ptmx.Read(buf)
+			if n > 0 {
+				data := make([]byte, n)
+				copy(data, buf[:n])
+				if sendErr := stream.Send(&agentv1.TerminalAgentMessage{
+					SessionId: sessionID,
+					Payload:   &agentv1.TerminalAgentMessage_Output{Output: data},
+				}); sendErr != nil {
+					slog.Debug("terminal: send output failed", "session_id", sessionID, "err", sendErr)
+					return
+				}
+			}
+			if err != nil {
+				return // PTY closed (shell exited)
+			}
+		}
+	}()
+
+	// Goroutine: read from gRPC stream → write to PTY stdin / handle resize / close
+	streamDone := make(chan struct{})
+	go func() {
+		defer close(streamDone)
+		for {
+			msg, err := stream.Recv()
+			if err != nil {
+				return
+			}
+
+			switch p := msg.Payload.(type) {
+			case *agentv1.TerminalServerMessage_Input:
+				if _, err := ptmx.Write(p.Input); err != nil {
+					slog.Debug("terminal: write to PTY failed", "session_id", sessionID, "err", err)
+					return
+				}
+			case *agentv1.TerminalServerMessage_Resize:
+				if err := pty.Setsize(ptmx, &pty.Winsize{
+					Cols: uint16(p.Resize.Cols),
+					Rows: uint16(p.Resize.Rows),
+				}); err != nil {
+					slog.Debug("terminal: resize failed", "session_id", sessionID, "err", err)
+				}
+			case *agentv1.TerminalServerMessage_Close:
+				// Browser disconnected — kill the shell
+				cmd.Process.Signal(os.Interrupt)
+				return
+			}
+		}
+	}()
+
+	// Wait for PTY to exit
+	<-ptyDone
+
+	// Get exit code
+	var exitCode int32
+	if err := cmd.Wait(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = int32(exitErr.ExitCode())
+		} else {
+			exitCode = -1
+		}
+	}
+
+	// Send closed message to ingest
+	stream.Send(&agentv1.TerminalAgentMessage{
+		SessionId: sessionID,
+		Payload:   &agentv1.TerminalAgentMessage_Closed{Closed: &agentv1.TerminalClosedMsg{ExitCode: exitCode}},
+	})
+	stream.CloseSend()
+
+	slog.Info("terminal session ended", "session_id", sessionID, "exit_code", exitCode)
+	return nil
+}

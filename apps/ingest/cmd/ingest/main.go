@@ -69,7 +69,10 @@ func main() {
 	regHandler := handlers.NewRegisterHandler(pool, issuer)
 	versionPoller := config.NewVersionPoller(cfg.Agent.LatestVersion, 5*time.Minute)
 	versionPoller.Start(ctx)
-	hbHandler := handlers.NewHeartbeatHandler(pool, issuer, q, versionPoller, cfg.Agent.DownloadBaseURL)
+	terminalStore := handlers.NewTerminalStore()
+	hbHandler := handlers.NewHeartbeatHandler(pool, issuer, q, versionPoller, cfg.Agent.DownloadBaseURL, terminalStore)
+	terminalHandler := handlers.NewTerminalHandler(pool, issuer, terminalStore)
+	terminalWSHandler := handlers.NewTerminalWSHandler(pool, terminalStore)
 
 	// Start JWKS HTTP server
 	go func() {
@@ -78,6 +81,7 @@ func main() {
 		mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 			fmt.Fprint(w, "ok")
 		})
+		mux.Handle("/ws/terminal/", terminalWSHandler)
 		addr := fmt.Sprintf(":%d", cfg.HTTPPort)
 		slog.Info("JWKS HTTP server starting", "addr", addr)
 		if err := http.ListenAndServe(addr, mux); err != nil && err != http.ErrServerClosed {
@@ -92,7 +96,7 @@ func main() {
 	grpcErr := make(chan error, 1)
 	go func() {
 		slog.Info("gRPC server starting", "port", cfg.GRPCPort)
-		grpcErr <- ingestgrpc.Serve(ctx, cfg.GRPCPort, creds, regHandler, hbHandler)
+		grpcErr <- ingestgrpc.Serve(ctx, cfg.GRPCPort, creds, regHandler, hbHandler, terminalHandler)
 	}()
 
 	select {

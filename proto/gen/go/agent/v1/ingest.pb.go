@@ -24,24 +24,29 @@ var File_agent_v1_ingest_proto protoreflect.FileDescriptor
 
 const file_agent_v1_ingest_proto_rawDesc = "" +
 	"\n" +
-	"\x15agent/v1/ingest.proto\x12\bagent.v1\x1a\x1bagent/v1/registration.proto\x1a\x18agent/v1/heartbeat.proto2\x9c\x01\n" +
+	"\x15agent/v1/ingest.proto\x12\bagent.v1\x1a\x1bagent/v1/registration.proto\x1a\x18agent/v1/heartbeat.proto\x1a\x17agent/v1/terminal.proto2\xed\x01\n" +
 	"\rIngestService\x12A\n" +
 	"\bRegister\x12\x19.agent.v1.RegisterRequest\x1a\x1a.agent.v1.RegisterResponse\x12H\n" +
-	"\tHeartbeat\x12\x1a.agent.v1.HeartbeatRequest\x1a\x1b.agent.v1.HeartbeatResponse(\x010\x01B.Z,github.com/infrawatch/proto/agent/v1;agentv1b\x06proto3"
+	"\tHeartbeat\x12\x1a.agent.v1.HeartbeatRequest\x1a\x1b.agent.v1.HeartbeatResponse(\x010\x01\x12O\n" +
+	"\bTerminal\x12\x1e.agent.v1.TerminalAgentMessage\x1a\x1f.agent.v1.TerminalServerMessage(\x010\x01B.Z,github.com/infrawatch/proto/agent/v1;agentv1b\x06proto3"
 
 var file_agent_v1_ingest_proto_goTypes = []any{
-	(*RegisterRequest)(nil),   // 0: agent.v1.RegisterRequest
-	(*HeartbeatRequest)(nil),  // 1: agent.v1.HeartbeatRequest
-	(*RegisterResponse)(nil),  // 2: agent.v1.RegisterResponse
-	(*HeartbeatResponse)(nil), // 3: agent.v1.HeartbeatResponse
+	(*RegisterRequest)(nil),       // 0: agent.v1.RegisterRequest
+	(*HeartbeatRequest)(nil),      // 1: agent.v1.HeartbeatRequest
+	(*TerminalAgentMessage)(nil),  // 2: agent.v1.TerminalAgentMessage
+	(*RegisterResponse)(nil),      // 3: agent.v1.RegisterResponse
+	(*HeartbeatResponse)(nil),     // 4: agent.v1.HeartbeatResponse
+	(*TerminalServerMessage)(nil), // 5: agent.v1.TerminalServerMessage
 }
 var file_agent_v1_ingest_proto_depIdxs = []int32{
 	0, // 0: agent.v1.IngestService.Register:input_type -> agent.v1.RegisterRequest
 	1, // 1: agent.v1.IngestService.Heartbeat:input_type -> agent.v1.HeartbeatRequest
-	2, // 2: agent.v1.IngestService.Register:output_type -> agent.v1.RegisterResponse
-	3, // 3: agent.v1.IngestService.Heartbeat:output_type -> agent.v1.HeartbeatResponse
-	2, // [2:4] is the sub-list for method output_type
-	0, // [0:2] is the sub-list for method input_type
+	2, // 2: agent.v1.IngestService.Terminal:input_type -> agent.v1.TerminalAgentMessage
+	3, // 3: agent.v1.IngestService.Register:output_type -> agent.v1.RegisterResponse
+	4, // 4: agent.v1.IngestService.Heartbeat:output_type -> agent.v1.HeartbeatResponse
+	5, // 5: agent.v1.IngestService.Terminal:output_type -> agent.v1.TerminalServerMessage
+	3, // [3:6] is the sub-list for method output_type
+	0, // [0:3] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -54,6 +59,7 @@ func file_agent_v1_ingest_proto_init() {
 	}
 	file_agent_v1_registration_proto_init()
 	file_agent_v1_heartbeat_proto_init()
+	file_agent_v1_terminal_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

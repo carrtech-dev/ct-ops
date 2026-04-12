@@ -10,11 +10,13 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { CheckCircle2, XCircle, Info, Database, Cpu, HardDrive, MemoryStick, Users } from 'lucide-react'
+import { CheckCircle2, XCircle, Info, Database, Cpu, HardDrive, MemoryStick, Users, TerminalSquare, ScrollText } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { updateOrgName, saveLicenceKey, updateMetricRetention } from '@/lib/actions/settings'
 import { getOrgDefaultCollectionSettings, updateOrgDefaultCollectionSettings } from '@/lib/actions/host-settings'
+import { getOrgTerminalSettings, updateOrgTerminalSettings } from '@/lib/actions/terminal'
+import type { OrgTerminalSettings } from '@/lib/actions/terminal'
 import type { Organisation, HostCollectionSettings } from '@/lib/db/schema'
 import { DEFAULT_COLLECTION_SETTINGS } from '@/lib/db/schema'
 
@@ -130,6 +132,27 @@ export function SettingsClient({ org, isAdmin }: SettingsClientProps) {
       setCollectionSaveSuccess(true)
       queryClient.invalidateQueries({ queryKey: ['org-collection-defaults', org.id] })
       setTimeout(() => setCollectionSaveSuccess(false), 3000)
+    },
+  })
+
+  // Terminal settings
+  const [terminalSaveSuccess, setTerminalSaveSuccess] = useState(false)
+  const { data: terminalDefaults } = useQuery({
+    queryKey: ['org-terminal-settings', org.id],
+    queryFn: () => getOrgTerminalSettings(org.id),
+  })
+  const [localTerminalSettings, setLocalTerminalSettings] = useState<OrgTerminalSettings | null>(null)
+  const currentTerminalSettings = localTerminalSettings ?? terminalDefaults ?? { terminalEnabled: true, terminalLoggingEnabled: false }
+  const terminalDirty = localTerminalSettings !== null
+
+  const terminalMutation = useMutation({
+    mutationFn: (settings: OrgTerminalSettings) => updateOrgTerminalSettings(org.id, settings),
+    onSuccess: (result) => {
+      if ('error' in result) return
+      setLocalTerminalSettings(null)
+      setTerminalSaveSuccess(true)
+      queryClient.invalidateQueries({ queryKey: ['org-terminal-settings', org.id] })
+      setTimeout(() => setTerminalSaveSuccess(false), 3000)
     },
   })
 
@@ -337,6 +360,87 @@ export function SettingsClient({ org, isAdmin }: SettingsClientProps) {
               <p>Memory: {currentCollectionSettings.memory ? 'Enabled' : 'Disabled'}</p>
               <p>Disk: {currentCollectionSettings.disk ? 'Enabled' : 'Disabled'}</p>
               <p>Local Users: {currentCollectionSettings.localUsers ? 'Enabled' : 'Disabled'}</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Terminal Access section */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <TerminalSquare className="size-4 text-muted-foreground" />
+            Terminal Access
+          </CardTitle>
+          <CardDescription>
+            Control interactive terminal access across all hosts.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {isAdmin ? (
+            <>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <TerminalSquare className="size-4 text-muted-foreground" />
+                  <div>
+                    <Label className="text-sm">Enable Terminal Access</Label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      When disabled, no users can open terminal sessions on any host
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  checked={currentTerminalSettings.terminalEnabled}
+                  onCheckedChange={(checked) =>
+                    setLocalTerminalSettings({
+                      ...currentTerminalSettings,
+                      terminalEnabled: checked,
+                      terminalLoggingEnabled: checked ? currentTerminalSettings.terminalLoggingEnabled : false,
+                    })
+                  }
+                />
+              </div>
+              {currentTerminalSettings.terminalEnabled && (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <ScrollText className="size-4 text-muted-foreground" />
+                    <div>
+                      <Label className="text-sm">Enable Session Logging</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Record terminal output for compliance. Input (passwords) is not recorded.
+                      </p>
+                    </div>
+                  </div>
+                  <Switch
+                    checked={currentTerminalSettings.terminalLoggingEnabled}
+                    onCheckedChange={(checked) =>
+                      setLocalTerminalSettings({ ...currentTerminalSettings, terminalLoggingEnabled: checked })
+                    }
+                  />
+                </div>
+              )}
+              <div className="flex items-center gap-3 pt-2 border-t">
+                <Button
+                  size="sm"
+                  disabled={!terminalDirty || terminalMutation.isPending}
+                  onClick={() => terminalMutation.mutate(currentTerminalSettings)}
+                >
+                  {terminalMutation.isPending ? 'Saving...' : 'Save'}
+                </Button>
+                {terminalSaveSuccess && (
+                  <span className="flex items-center gap-1 text-sm text-green-700">
+                    <CheckCircle2 className="size-4" />
+                    Saved
+                  </span>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="space-y-2 text-sm">
+              <p>Terminal Access: {currentTerminalSettings.terminalEnabled ? 'Enabled' : 'Disabled'}</p>
+              {currentTerminalSettings.terminalEnabled && (
+                <p>Session Logging: {currentTerminalSettings.terminalLoggingEnabled ? 'Enabled' : 'Disabled'}</p>
+              )}
             </div>
           )}
         </CardContent>

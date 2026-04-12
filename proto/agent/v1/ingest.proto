@@ -4,6 +4,7 @@ package agent.v1;
 
 import "agent/v1/registration.proto";
 import "agent/v1/heartbeat.proto";
+import "agent/v1/terminal.proto";
 
 option go_package = "github.com/infrawatch/proto/agent/v1;agentv1";
 
@@ -15,4 +16,10 @@ service IngestService {
   // Heartbeat is a bidirectional stream. Agent sends metrics on interval;
   // server can push back commands (revocation, config reload, etc.).
   rpc Heartbeat(stream HeartbeatRequest) returns (stream HeartbeatResponse);
+
+  // Terminal is a bidirectional stream for interactive PTY sessions.
+  // Agent opens this stream after receiving a TerminalSessionRequest via
+  // HeartbeatResponse. Data flows in real-time between the browser (via
+  // WebSocket on the ingest HTTP server) and the agent's PTY.
+  rpc Terminal(stream TerminalAgentMessage) returns (stream TerminalServerMessage);
 }

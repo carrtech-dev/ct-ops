@@ -20,6 +20,7 @@ import (
 
 	"github.com/infrawatch/agent/internal/checks"
 	"github.com/infrawatch/agent/internal/tasks"
+	"github.com/infrawatch/agent/internal/terminal"
 	"github.com/infrawatch/agent/internal/updater"
 	agentv1 "github.com/infrawatch/proto/agent/v1"
 )
@@ -70,6 +71,13 @@ type Runner struct {
 	// task currently running on this agent. Used to stop tasks on server request.
 	taskCancelFuncs sync.Map
 
+	// Dedupes server-pushed terminal sessions.
+	seenTerminalIDs map[string]struct{}
+
+	// terminalCancelFuncs maps session_id → context.CancelFunc for active
+	// terminal sessions. Used to close terminals on server request.
+	terminalCancelFuncs sync.Map
+
 	// Signalled when new query results are ready so the send loop can fire
 	// an immediate heartbeat rather than waiting for the next 30s tick.
 	resultsReady chan struct{}
@@ -91,9 +99,10 @@ func New(dialFunc func() (*grpc.ClientConn, error), agentID, jwtToken, version s
 		version:      version,
 		interval:     time.Duration(intervalSecs) * time.Second,
 		executor:     executor,
-		seenQueryIDs: make(map[string]struct{}),
-		seenTaskIDs:  make(map[string]struct{}),
-		resultsReady: make(chan struct{}, 1),
+		seenQueryIDs:    make(map[string]struct{}),
+		seenTaskIDs:     make(map[string]struct{}),
+		seenTerminalIDs: make(map[string]struct{}),
+		resultsReady:    make(chan struct{}, 1),
 	}
 }
 
@@ -158,6 +167,7 @@ func (r *Runner) runStream(ctx context.Context) error {
 	r.seenMu.Lock()
 	r.seenQueryIDs = make(map[string]struct{})
 	r.seenTaskIDs = make(map[string]struct{})
+	r.seenTerminalIDs = make(map[string]struct{})
 	r.seenMu.Unlock()
 
 	slog.Info("heartbeat stream opened", "agent_id", r.agentID)
@@ -276,6 +286,27 @@ func (r *Runner) handleResponse(ctx context.Context, resp *agentv1.HeartbeatResp
 			}
 		}
 	}
+	if len(resp.PendingTerminalSessions) > 0 {
+		for _, ts := range resp.PendingTerminalSessions {
+			r.seenMu.Lock()
+			_, dup := r.seenTerminalIDs[ts.SessionId]
+			if !dup {
+				r.seenTerminalIDs[ts.SessionId] = struct{}{}
+			}
+			r.seenMu.Unlock()
+			if !dup {
+				go r.openTerminalSession(ts)
+			}
+		}
+	}
+	if len(resp.CancelTerminalSessions) > 0 {
+		for _, id := range resp.CancelTerminalSessions {
+			if fn, ok := r.terminalCancelFuncs.Load(id); ok {
+				slog.Info("cancelling terminal session on server request", "session_id", id)
+				fn.(context.CancelFunc)()
+			}
+		}
+	}
 	if resp.UpdateAvailable && resp.DownloadUrl != "" {
 		slog.Info("agent update available, downloading",
 			"current", r.version,
@@ -370,6 +401,21 @@ func (r *Runner) executeTask(ctx context.Context, task *agentv1.AgentTask) {
 	select {
 	case r.resultsReady <- struct{}{}:
 	default:
+	}
+}
+
+// openTerminalSession opens a PTY session and bridges it to the ingest service
+// via a dedicated Terminal gRPC stream.
+func (r *Runner) openTerminalSession(req *agentv1.TerminalSessionRequest) {
+	_, cancel := context.WithCancel(context.Background())
+	r.terminalCancelFuncs.Store(req.SessionId, cancel)
+	defer func() {
+		cancel()
+		r.terminalCancelFuncs.Delete(req.SessionId)
+	}()
+
+	if err := terminal.OpenSession(r.dialFunc, r.jwtToken, req); err != nil {
+		slog.Warn("terminal session error", "session_id", req.SessionId, "err", err)
 	}
 }
 

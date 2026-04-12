@@ -4,6 +4,8 @@ import type { HostCollectionSettings } from './hosts'
 
 export interface OrgMetadata {
   defaultCollectionSettings?: HostCollectionSettings
+  terminalEnabled?: boolean
+  terminalLoggingEnabled?: boolean
 }
 
 export const organisations = pgTable('organisations', {
