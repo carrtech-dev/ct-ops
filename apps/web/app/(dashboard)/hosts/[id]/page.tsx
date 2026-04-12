@@ -26,6 +26,7 @@ export default async function HostDetailPage({ params }: Props) {
       host={host}
       orgId={orgId}
       currentUserId={session.user.id}
+      userRole={session.user.role}
       latestAgentVersion={REQUIRED_AGENT_VERSION}
     />
   )

@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	IngestService_Register_FullMethodName  = "/agent.v1.IngestService/Register"
 	IngestService_Heartbeat_FullMethodName = "/agent.v1.IngestService/Heartbeat"
+	IngestService_Terminal_FullMethodName  = "/agent.v1.IngestService/Terminal"
 )
 
 // IngestServiceClient is the client API for IngestService service.
@@ -33,6 +34,11 @@ type IngestServiceClient interface {
 	// Heartbeat is a bidirectional stream. Agent sends metrics on interval;
 	// server can push back commands (revocation, config reload, etc.).
 	Heartbeat(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[HeartbeatRequest, HeartbeatResponse], error)
+	// Terminal is a bidirectional stream for interactive PTY sessions.
+	// Agent opens this stream after receiving a TerminalSessionRequest via
+	// HeartbeatResponse. Data flows in real-time between the browser (via
+	// WebSocket on the ingest HTTP server) and the agent's PTY.
+	Terminal(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[TerminalAgentMessage, TerminalServerMessage], error)
 }
 
 type ingestServiceClient struct {
@@ -66,6 +72,19 @@ func (c *ingestServiceClient) Heartbeat(ctx context.Context, opts ...grpc.CallOp
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type IngestService_HeartbeatClient = grpc.BidiStreamingClient[HeartbeatRequest, HeartbeatResponse]
 
+func (c *ingestServiceClient) Terminal(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[TerminalAgentMessage, TerminalServerMessage], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &IngestService_ServiceDesc.Streams[1], IngestService_Terminal_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[TerminalAgentMessage, TerminalServerMessage]{ClientStream: stream}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type IngestService_TerminalClient = grpc.BidiStreamingClient[TerminalAgentMessage, TerminalServerMessage]
+
 // IngestServiceServer is the server API for IngestService service.
 // All implementations must embed UnimplementedIngestServiceServer
 // for forward compatibility.
@@ -76,6 +95,11 @@ type IngestServiceServer interface {
 	// Heartbeat is a bidirectional stream. Agent sends metrics on interval;
 	// server can push back commands (revocation, config reload, etc.).
 	Heartbeat(grpc.BidiStreamingServer[HeartbeatRequest, HeartbeatResponse]) error
+	// Terminal is a bidirectional stream for interactive PTY sessions.
+	// Agent opens this stream after receiving a TerminalSessionRequest via
+	// HeartbeatResponse. Data flows in real-time between the browser (via
+	// WebSocket on the ingest HTTP server) and the agent's PTY.
+	Terminal(grpc.BidiStreamingServer[TerminalAgentMessage, TerminalServerMessage]) error
 	mustEmbedUnimplementedIngestServiceServer()
 }
 
@@ -91,6 +115,9 @@ func (UnimplementedIngestServiceServer) Register(context.Context, *RegisterReque
 }
 func (UnimplementedIngestServiceServer) Heartbeat(grpc.BidiStreamingServer[HeartbeatRequest, HeartbeatResponse]) error {
 	return status.Error(codes.Unimplemented, "method Heartbeat not implemented")
+}
+func (UnimplementedIngestServiceServer) Terminal(grpc.BidiStreamingServer[TerminalAgentMessage, TerminalServerMessage]) error {
+	return status.Error(codes.Unimplemented, "method Terminal not implemented")
 }
 func (UnimplementedIngestServiceServer) mustEmbedUnimplementedIngestServiceServer() {}
 func (UnimplementedIngestServiceServer) testEmbeddedByValue()                       {}
@@ -138,6 +165,13 @@ func _IngestService_Heartbeat_Handler(srv interface{}, stream grpc.ServerStream)
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type IngestService_HeartbeatServer = grpc.BidiStreamingServer[HeartbeatRequest, HeartbeatResponse]
 
+func _IngestService_Terminal_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(IngestServiceServer).Terminal(&grpc.GenericServerStream[TerminalAgentMessage, TerminalServerMessage]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type IngestService_TerminalServer = grpc.BidiStreamingServer[TerminalAgentMessage, TerminalServerMessage]
+
 // IngestService_ServiceDesc is the grpc.ServiceDesc for IngestService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -154,6 +188,12 @@ var IngestService_ServiceDesc = grpc.ServiceDesc{
 		{
 			StreamName:    "Heartbeat",
 			Handler:       _IngestService_Heartbeat_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+		{
+			StreamName:    "Terminal",
+			Handler:       _IngestService_Terminal_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
 		},

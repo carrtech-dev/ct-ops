@@ -27,16 +27,18 @@ type HeartbeatHandler struct {
 	publisher       queue.Publisher
 	versionPoller   *config.VersionPoller
 	downloadBaseURL string
+	terminalStore   *TerminalStore
 }
 
 // NewHeartbeatHandler creates a HeartbeatHandler.
-func NewHeartbeatHandler(pool *pgxpool.Pool, issuer *auth.JWTIssuer, pub queue.Publisher, versionPoller *config.VersionPoller, downloadBaseURL string) *HeartbeatHandler {
+func NewHeartbeatHandler(pool *pgxpool.Pool, issuer *auth.JWTIssuer, pub queue.Publisher, versionPoller *config.VersionPoller, downloadBaseURL string, terminalStore *TerminalStore) *HeartbeatHandler {
 	return &HeartbeatHandler{
 		pool:            pool,
 		issuer:          issuer,
 		publisher:       pub,
 		versionPoller:   versionPoller,
 		downloadBaseURL: downloadBaseURL,
+		terminalStore:   terminalStore,
 	}
 }
 
@@ -254,6 +256,23 @@ loop:
 				}
 				slog.Info("pushed cancel task IDs to agent", "host_id", hostID, "count", len(cancelIDs))
 			}
+
+			// Push pending terminal sessions to the agent.
+			if h.terminalStore != nil {
+				pendingSessions, tsErr := queries.GetPendingTerminalSessionsForHost(ctx, h.pool, hostID)
+				if tsErr != nil {
+					slog.Warn("fetching pending terminal sessions", "host_id", hostID, "err", tsErr)
+				} else if len(pendingSessions) > 0 {
+					if err := stream.Send(&agentv1.HeartbeatResponse{
+						Ok:                      true,
+						PendingTerminalSessions: pendingSessions,
+					}); err != nil {
+						slog.Warn("pushing terminal sessions to agent", "host_id", hostID, "err", err)
+						return err
+					}
+					slog.Info("pushed pending terminal sessions to agent", "host_id", hostID, "count", len(pendingSessions))
+				}
+			}
 	}
 
 	// Mark agent and host offline on stream close
@@ -262,6 +281,12 @@ loop:
 	}
 	if err := queries.SetHostOffline(context.Background(), h.pool, agentID); err != nil {
 		slog.Warn("setting host offline", "err", err)
+	}
+	// Clean up any in-flight terminal sessions for this host
+	if hostID != "" {
+		if err := queries.CleanupTerminalSessionsForHost(context.Background(), h.pool, hostID); err != nil {
+			slog.Warn("cleaning up terminal sessions for host", "host_id", hostID, "err", err)
+		}
 	}
 	if err := queries.InsertAgentStatusHistory(context.Background(), h.pool, agentID, agent.OrganisationID, "offline", nil, "heartbeat stream closed"); err != nil {
 		slog.Warn("inserting offline status history", "err", err)

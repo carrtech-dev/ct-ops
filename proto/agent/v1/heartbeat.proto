@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package agent.v1;
 
+import "agent/v1/terminal.proto";
+
 option go_package = "github.com/infrawatch/proto/agent/v1;agentv1";
 
 message DiskInfo {
@@ -122,4 +124,6 @@ message HeartbeatResponse {
   repeated AgentQuery pending_queries = 8;
   AgentTask pending_task = 9;          // current pending task (one at a time; absent = none)
   repeated string cancel_task_ids = 10; // task_run_hosts.id values the agent must cancel immediately
+  repeated TerminalSessionRequest pending_terminal_sessions = 11; // terminal sessions to open
+  repeated string cancel_terminal_sessions = 12;                  // terminal sessions to close
 }
