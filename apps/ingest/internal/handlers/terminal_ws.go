@@ -89,10 +89,24 @@ func (h *TerminalWSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		slog.Info("terminal ws: session ended", "session_id", sessionID, "duration_seconds", duration)
 	}()
 
-	// Goroutine: read from toBrowser channel → send to WebSocket
+	// Goroutine: notify browser when agent connects, then relay PTY output
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+
+		// Wait for the agent to connect via gRPC and bridge this session.
+		select {
+		case <-sess.agentConnected:
+			slog.Info("terminal ws: agent connected, bridge is up", "session_id", sessionID)
+			agentMsg, _ := json.Marshal(wsMessage{Type: "agent_connected"})
+			if err := conn.Write(ctx, websocket.MessageText, agentMsg); err != nil {
+				return
+			}
+		case <-sessCtx.Done():
+			return
+		}
+
+		// Relay PTY output from the gRPC handler to the browser.
 		for {
 			select {
 			case <-sessCtx.Done():

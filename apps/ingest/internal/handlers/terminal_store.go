@@ -20,6 +20,11 @@ type terminalSession struct {
 	// (received from the agent) to the WebSocket handler which sends them to the browser.
 	toBrowser chan []byte
 
+	// agentConnected is closed by the gRPC Terminal handler when the agent
+	// successfully bridges this session. The WS handler watches this to
+	// notify the browser that the full pipeline is up.
+	agentConnected chan struct{}
+
 	cancel    context.CancelFunc
 	startedAt time.Time
 
@@ -85,6 +90,7 @@ func (s *TerminalStore) Register(sessionID string, loggingEnabled bool) (*termin
 	sess := &terminalSession{
 		fromBrowser:    make(chan []byte, 64),
 		toBrowser:      make(chan []byte, 64),
+		agentConnected: make(chan struct{}),
 		cancel:         cancel,
 		startedAt:      time.Now(),
 		recording:      rec,

@@ -84,6 +84,9 @@ func (h *TerminalHandler) Terminal(stream agentv1.IngestService_TerminalServer) 
 		return status.Error(codes.NotFound, "terminal session not found in store")
 	}
 
+	// Signal the WS handler that the agent has connected and the bridge is up.
+	close(sess.agentConnected)
+
 	// Goroutine: read from fromBrowser channel → parse → send to agent via stream
 	agentDone := make(chan struct{})
 	go func() {
