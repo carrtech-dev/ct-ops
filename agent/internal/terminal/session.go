@@ -53,15 +53,24 @@ func OpenSession(dialFunc func() (*grpc.ClientConn, error), jwtToken string, req
 		return fmt.Errorf("terminal handshake send: %w", err)
 	}
 
-	// Detect shell
+	// Detect shell — prefer bash, fall back to sh
 	shell := os.Getenv("SHELL")
 	if shell == "" {
-		shell = "/bin/sh"
+		if _, err := os.Stat("/bin/bash"); err == nil {
+			shell = "/bin/bash"
+		} else {
+			shell = "/bin/sh"
+		}
 	}
 
-	// Start PTY
-	cmd := exec.Command(shell)
-	cmd.Env = os.Environ()
+	// Start PTY with a proper login environment
+	cmd := exec.Command(shell, "-l")
+	cmd.Dir = homeDir()
+	env := os.Environ()
+	env = setEnv(env, "TERM", "xterm-256color")
+	env = setEnv(env, "HOME", homeDir())
+	env = setEnv(env, "SHELL", shell)
+	cmd.Env = env
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
 		Cols: uint16(req.Cols),
 		Rows: uint16(req.Rows),
@@ -154,4 +163,24 @@ func OpenSession(dialFunc func() (*grpc.ClientConn, error), jwtToken string, req
 
 	slog.Info("terminal session ended", "session_id", sessionID, "exit_code", exitCode)
 	return nil
+}
+
+// homeDir returns the current user's home directory, falling back to /root.
+func homeDir() string {
+	if h := os.Getenv("HOME"); h != "" {
+		return h
+	}
+	return "/root"
+}
+
+// setEnv sets or replaces an environment variable in a slice.
+func setEnv(env []string, key, value string) []string {
+	prefix := key + "="
+	for i, e := range env {
+		if len(e) >= len(prefix) && e[:len(prefix)] == prefix {
+			env[i] = prefix + value
+			return env
+		}
+	}
+	return append(env, prefix+value)
 }
