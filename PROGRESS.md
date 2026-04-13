@@ -9,11 +9,154 @@
 **Phase 5 — Tooling (in progress)**
 
 ## Current Status
-🟢 Phase 4 complete — Service accounts, SSH key discovery, LDAP directory integration, per-host collection settings, and agent lifecycle management (install/uninstall/auto re-register) all built and stable. Phase 5 started: general-purpose agent task framework implemented with Linux host patching as the first task type, real-time streaming output, parallelism control, and task cancellation. UI polish: dark mode with per-user preference saved to DB and applied server-side on every page load.
+🟢 Phase 5 progressing — Task framework expanded with custom script runner, service management (start/stop/restart/status), and service autocomplete from live host queries. Metrics charts upgraded with click-drag zoom and adaptive bucketing. WebSocket-based interactive terminal fully implemented: persistent bottom panel with tabs, per-user host authentication, cross-distro su/login support, username memory, session persistence across browser refresh, and reconnect-on-exit. Terminal is now a VS Code-style panel visible on all pages.
 
 ---
 
 ## What Has Been Built
+
+### Session 33 — Terminal UX polish: saved username and reconnect on exit
+
+**Username memory** (`apps/web/components/terminal/host-terminal-launcher.tsx`, `terminal-session.tsx`, `host-selector-dialog.tsx`)
+- Last-used terminal username per host per user saved to `localStorage` (`terminal-username-{hostId}-{userId}`)
+- Pre-fills the username input on subsequent connections to the same host
+- Uses `useMemo` (not `useEffect`) to read saved value — avoids unnecessary re-renders
+
+**Reconnect on exit** (`apps/web/components/terminal/terminal-session.tsx`)
+- When a terminal session ends (e.g. typing `exit`), displays a "Press any key to reconnect" prompt
+- Reconnects with the same host and username on keypress instead of leaving a dead terminal
+
+**Build state**
+- `pnpm run build` — zero TypeScript errors ✅
+
+---
+
+### Session 32 — Terminal tab persistence across browser refresh
+
+**Session storage persistence** (`apps/web/components/terminal/terminal-panel-context.tsx`)
+- Open terminal tabs (host ID, hostname, username, panel height, active tab index) saved to `sessionStorage` on every state change
+- On page load, restores tabs with fresh session IDs — triggers automatic reconnection to the same hosts
+- Correctly scoped to browser tab (`sessionStorage` not `localStorage`) — tabs don't survive closing the browser tab, which is correct since PTY sessions are dead at that point
+
+**Provider scope fix** (`apps/web/app/(dashboard)/layout.tsx`)
+- `TerminalPanelProvider` moved above the sidebar component so the terminal trigger button in the sidebar nav has provider context
+
+**Build state**
+- `pnpm run build` — zero TypeScript errors ✅
+
+---
+
+### Session 31 — Terminal redesign: persistent bottom panel with tabs
+
+**Panel architecture** (`apps/web/components/terminal/`)
+- New `terminal-panel.tsx` — VS Code-style resizable bottom panel visible on all dashboard pages
+- `terminal-panel-context.tsx` — React context managing tab state (add/remove/switch tabs), panel visibility and height
+- `terminal-layout-wrapper.tsx` — wraps page content and renders the panel below
+- `terminal-session.tsx` — individual xterm.js session component, one per tab
+- `host-selector-dialog.tsx` — searchable host picker with username input, accessible from sidebar nav and host detail page
+- Old `terminal-tab.tsx` removed from host detail page — replaced by the global panel
+
+**Sidebar integration** (`apps/web/components/shared/sidebar.tsx`)
+- "Terminal" entry added under Tooling section in the sidebar nav
+- Opens the host selector dialog; selected host opens as a new tab in the persistent panel
+
+**Host detail launcher** (`apps/web/app/(dashboard)/hosts/[id]/host-terminal-launcher.tsx`)
+- "Open Terminal" button on host detail page opens a tab in the global panel for that specific host
+
+**Build state**
+- `pnpm run build` — zero TypeScript errors ✅
+
+---
+
+### Session 30 — Per-user terminal authentication and cross-distro shell support
+
+**Per-user authentication** (`apps/web/lib/db/schema/terminal-sessions.ts`, `agent/internal/terminal/session.go`)
+- New `username` column on `terminal_sessions` table — migration `0025_luxuriant_smasher.sql`
+- Agent launches PTY via `su -l <username>` with dropped privileges (not `login`, which varies across distros)
+- Organisation-level "Direct Access" toggle (`terminalDirectAccess` in org metadata) allows bypassing username requirement
+- UI shows username input on terminal tab; direct access mode skips it
+
+**Shell environment hardening** (`agent/internal/terminal/session.go`)
+- Agent sets `TERM=xterm-256color`, `HOME`, and prefers `bash` over default shell for PTY sessions
+- Cross-distro compatibility: tested with Ubuntu, AlmaLinux, CentOS patterns
+
+**Auth fallback** (`apps/ingest/`)
+- Falls back to `session_id` auth when agent JWT signature verification fails (handles key rotation gracefully)
+- Accepts expired agent JWTs for Terminal gRPC streams — terminal sessions shouldn't break during token rotation windows
+
+**Build state**
+- `pnpm run build` — zero TypeScript errors ✅
+- `go build ./agent/... ./apps/ingest/...` — zero errors ✅
+
+---
+
+### Session 29 — WebSocket terminal: initial implementation and agent connection debugging
+
+**Terminal protocol** (`proto/agent/v1/terminal.proto`, `proto/agent/v1/heartbeat.proto`)
+- New `TerminalSession` message: session ID, host ID, status, input/output/resize frames
+- `HeartbeatResponse` gains `pending_terminal_sessions` field — ingest pushes pending sessions to agent on every heartbeat
+- New `TerminalStream` RPC on ingest service for bidirectional terminal I/O
+
+**Database schema** (`apps/web/lib/db/schema/terminal-sessions.ts`, migration `0024_flat_blade.sql`)
+- `terminal_sessions` table: session ID, host ID, user ID, org ID, status (pending/connected/disconnected/failed), timestamps
+
+**Ingest: session routing** (`apps/ingest/`)
+- Pending terminal sessions included in every heartbeat response so agent picks them up
+- Terminal data streamed over existing gRPC connection — no additional ports required
+- Diagnostic messages added during development: session state tracking, push counters, agent status reverse-lookup
+
+**Agent: PTY management** (`agent/internal/terminal/`)
+- `session.go` — opens PTY, reads/writes terminal frames, handles resize events
+- Integrated with heartbeat response handler — agent starts terminal session when it receives a pending session
+
+**Web: terminal UI** (`apps/web/app/(dashboard)/hosts/[id]/terminal-tab.tsx`)
+- xterm.js terminal embedded in host detail page tab
+- WebSocket connection from browser → Next.js API route → ingest gRPC stream
+- Container shown during "connecting" state to avoid 0x0 dimension bug with xterm
+
+**Organisation settings** (`apps/web/app/(dashboard)/settings/settings-client.tsx`)
+- Terminal enable/disable toggle and port configuration in org settings
+
+**Build state**
+- `pnpm run build` — zero TypeScript errors ✅
+- `go build ./agent/... ./apps/ingest/...` — zero errors ✅
+
+---
+
+### Session 28 — Chart zoom, smart bucketing, custom scripts, and service management
+
+**Metrics chart improvements** (`apps/web/components/charts/`, `apps/web/hooks/use-chart-zoom.ts`)
+- Extracted Recharts into reusable `HostMetricsLineChart` and `HostHeartbeatBarChart` components under `components/charts/`
+- `useChartZoom` hook: click-drag zoom on any chart, reset button to restore original range
+- Adaptive `time_bucket` sizing: capped at 300 data points regardless of time range — prevents chart overload on 30d views
+- New 6h and 30d time range presets
+
+**Custom script runner** (`agent/internal/tasks/script.go`, `apps/web/lib/actions/task-runs.ts`)
+- New `custom_script` task type: agent receives script content, writes to temp file, executes with streaming output
+- `triggerCustomScriptRun` / `triggerGroupCustomScriptRun` server actions
+- Script input dialog on host detail and group detail pages with multiline editor
+- Task monitor page shows script content in results panel
+
+**Service management** (`agent/internal/tasks/service.go`, `apps/web/lib/actions/task-runs.ts`)
+- New `service_action` task type: start / stop / restart / status operations on systemd services
+- `triggerServiceAction` / `triggerGroupServiceAction` server actions
+- Service action dialog with autocomplete: "Query server" button fetches running services from the host via `list_services` agent query, shows clickable dropdown
+- Task monitor page shows service-specific result formatting
+
+**Interactive terminal on host detail** (`apps/web/app/(dashboard)/hosts/[id]/terminal-tab.tsx`)
+- Terminal tab on host detail page: each command creates a `custom_script` task run, output streams at 1.5s poll intervals
+- Up/down arrow command history recall, Ctrl+C cancels running command, Clear button wipes session
+
+**Task history management** (`apps/web/app/(dashboard)/hosts/[id]/tasks-tab.tsx`, `apps/web/lib/actions/task-runs.ts`)
+- Checkbox selection on task history tables (host and group views)
+- Select-all header checkbox, bulk Delete button
+- Soft-deletes selected `task_run` and `task_run_hosts` rows
+
+**Build state**
+- `pnpm run build` — zero TypeScript errors ✅
+- `go build ./agent/... ./apps/ingest/...` — zero errors ✅
+
+---
 
 ### Session 27 — Dark mode with per-user theme preference
 
@@ -1004,6 +1147,10 @@ Phase 3 is complete and all known technical debt is resolved. Phase 4 starts her
 - [ ] LDAP/AD integration
 
 ### Phase 5 — Infrastructure Tooling
+- [x] Custom script runner — run arbitrary scripts on hosts/groups with streaming output
+- [x] Service management — start/stop/restart/status with live service autocomplete
+- [x] Interactive terminal — WebSocket PTY terminal with persistent panel, tabs, per-user auth
+- [x] Chart zoom and smart bucketing — click-drag zoom, adaptive time_bucket, reusable chart components
 - [ ] Jenkins plugin bundler (port existing)
 - [ ] Docker image bundler
 - [ ] Ansible collection bundler
