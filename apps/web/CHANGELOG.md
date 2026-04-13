@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.25.1](https://github.com/simonjcarr/infrawatch/compare/web/v0.25.0...web/v0.25.1) (2026-04-13)
+
+
+### Bug Fixes
+
+* **terminal:** move provider above sidebar for context access ([f465ff3](https://github.com/simonjcarr/infrawatch/commit/f465ff3bb79570067fec8456913af25e40e10994))
+* **terminal:** move TerminalPanelProvider above sidebar so trigger has context ([2bf71c6](https://github.com/simonjcarr/infrawatch/commit/2bf71c624632a6c33634fa92656cc76fe0683bd7))
+
 ## [0.25.0](https://github.com/simonjcarr/infrawatch/compare/web/v0.24.0...web/v0.25.0) (2026-04-13)
 
 
