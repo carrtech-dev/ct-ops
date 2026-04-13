@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { CheckCircle2, XCircle, Info, Database, Cpu, HardDrive, MemoryStick, Users, TerminalSquare, ScrollText } from 'lucide-react'
+import { CheckCircle2, XCircle, Info, Database, Cpu, HardDrive, MemoryStick, Users, TerminalSquare, ScrollText, ShieldAlert } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { updateOrgName, saveLicenceKey, updateMetricRetention } from '@/lib/actions/settings'
@@ -142,7 +142,7 @@ export function SettingsClient({ org, isAdmin }: SettingsClientProps) {
     queryFn: () => getOrgTerminalSettings(org.id),
   })
   const [localTerminalSettings, setLocalTerminalSettings] = useState<OrgTerminalSettings | null>(null)
-  const currentTerminalSettings = localTerminalSettings ?? terminalDefaults ?? { terminalEnabled: true, terminalLoggingEnabled: false }
+  const currentTerminalSettings = localTerminalSettings ?? terminalDefaults ?? { terminalEnabled: true, terminalLoggingEnabled: false, terminalDirectAccess: false }
   const terminalDirty = localTerminalSettings !== null
 
   const terminalMutation = useMutation({
@@ -401,23 +401,48 @@ export function SettingsClient({ org, isAdmin }: SettingsClientProps) {
                 />
               </div>
               {currentTerminalSettings.terminalEnabled && (
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <ScrollText className="size-4 text-muted-foreground" />
-                    <div>
-                      <Label className="text-sm">Enable Session Logging</Label>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        Record terminal output for compliance. Input (passwords) is not recorded.
-                      </p>
+                <>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <ScrollText className="size-4 text-muted-foreground" />
+                      <div>
+                        <Label className="text-sm">Enable Session Logging</Label>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Record terminal output for compliance. Input (passwords) is not recorded.
+                        </p>
+                      </div>
                     </div>
+                    <Switch
+                      checked={currentTerminalSettings.terminalLoggingEnabled}
+                      onCheckedChange={(checked) =>
+                        setLocalTerminalSettings({ ...currentTerminalSettings, terminalLoggingEnabled: checked })
+                      }
+                    />
                   </div>
-                  <Switch
-                    checked={currentTerminalSettings.terminalLoggingEnabled}
-                    onCheckedChange={(checked) =>
-                      setLocalTerminalSettings({ ...currentTerminalSettings, terminalLoggingEnabled: checked })
-                    }
-                  />
-                </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <ShieldAlert className="size-4 text-muted-foreground" />
+                      <div>
+                        <Label className="text-sm">Direct Access (Legacy)</Label>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          When enabled, terminal sessions run as the agent system user (typically root).
+                          When disabled, users must authenticate with their own host credentials.
+                        </p>
+                        {currentTerminalSettings.terminalDirectAccess && (
+                          <p className="text-xs text-destructive mt-1">
+                            All authorised users will have agent-level (root) access to hosts.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <Switch
+                      checked={currentTerminalSettings.terminalDirectAccess}
+                      onCheckedChange={(checked) =>
+                        setLocalTerminalSettings({ ...currentTerminalSettings, terminalDirectAccess: checked })
+                      }
+                    />
+                  </div>
+                </>
               )}
               <div className="flex items-center gap-3 pt-2 border-t">
                 <Button
@@ -439,7 +464,10 @@ export function SettingsClient({ org, isAdmin }: SettingsClientProps) {
             <div className="space-y-2 text-sm">
               <p>Terminal Access: {currentTerminalSettings.terminalEnabled ? 'Enabled' : 'Disabled'}</p>
               {currentTerminalSettings.terminalEnabled && (
-                <p>Session Logging: {currentTerminalSettings.terminalLoggingEnabled ? 'Enabled' : 'Disabled'}</p>
+                <>
+                  <p>Session Logging: {currentTerminalSettings.terminalLoggingEnabled ? 'Enabled' : 'Disabled'}</p>
+                  <p>Direct Access (Legacy): {currentTerminalSettings.terminalDirectAccess ? 'Enabled' : 'Disabled'}</p>
+                </>
               )}
             </div>
           )}

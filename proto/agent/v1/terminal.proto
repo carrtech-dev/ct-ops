@@ -8,9 +8,11 @@ option go_package = "github.com/infrawatch/proto/agent/v1;agentv1";
 // instruct the agent to open a PTY session and connect back via the
 // Terminal RPC stream.
 message TerminalSessionRequest {
-  string session_id = 1;
-  uint32 cols       = 2;
-  uint32 rows       = 3;
+  string session_id    = 1;
+  uint32 cols          = 2;
+  uint32 rows          = 3;
+  string username      = 4;  // host-level username for su authentication
+  bool   direct_access = 5;  // true = legacy mode (shell as agent user)
 }
 
 message TerminalResizeMsg {

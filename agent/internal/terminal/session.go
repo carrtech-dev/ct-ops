@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"regexp"
 
 	"github.com/creack/pty"
 	"google.golang.org/grpc"
@@ -15,6 +16,8 @@ import (
 
 	agentv1 "github.com/infrawatch/proto/agent/v1"
 )
+
+var validUsernameRE = regexp.MustCompile(`^[a-zA-Z0-9._@\\-]+$`)
 
 // OpenSession opens a Terminal gRPC stream to the ingest service, creates a
 // PTY running the user's shell, and bridges bytes between the PTY and the
@@ -53,24 +56,43 @@ func OpenSession(dialFunc func() (*grpc.ClientConn, error), jwtToken string, req
 		return fmt.Errorf("terminal handshake send: %w", err)
 	}
 
-	// Detect shell — prefer bash, fall back to sh
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		if _, err := os.Stat("/bin/bash"); err == nil {
-			shell = "/bin/bash"
-		} else {
-			shell = "/bin/sh"
+	// Build command based on auth mode
+	var cmd *exec.Cmd
+	if req.DirectAccess {
+		// Legacy mode: run shell as agent user (prefer bash, fall back to sh)
+		shell := os.Getenv("SHELL")
+		if shell == "" {
+			if _, err := os.Stat("/bin/bash"); err == nil {
+				shell = "/bin/bash"
+			} else {
+				shell = "/bin/sh"
+			}
 		}
+		cmd = exec.Command(shell, "-l")
+		cmd.Dir = homeDir()
+		env := os.Environ()
+		env = setEnv(env, "TERM", "xterm-256color")
+		env = setEnv(env, "HOME", homeDir())
+		env = setEnv(env, "SHELL", shell)
+		cmd.Env = env
+		slog.Info("terminal: direct access mode", "session_id", sessionID, "shell", shell)
+	} else if req.Username != "" {
+		// Per-user mode: validate username and use su to authenticate
+		if len(req.Username) > 256 || !validUsernameRE.MatchString(req.Username) {
+			sendClosedMsg(stream, sessionID, -1)
+			return fmt.Errorf("terminal: invalid username %q", req.Username)
+		}
+		cmd = exec.Command("su", "-", req.Username)
+		cmd.Dir = "/"
+		env := os.Environ()
+		env = setEnv(env, "TERM", "xterm-256color")
+		cmd.Env = env
+		slog.Info("terminal: per-user mode", "session_id", sessionID, "username", req.Username)
+	} else {
+		// No username and not direct access — refuse session
+		sendClosedMsg(stream, sessionID, -1)
+		return fmt.Errorf("terminal: username required when direct access is disabled")
 	}
-
-	// Start PTY with a proper login environment
-	cmd := exec.Command(shell, "-l")
-	cmd.Dir = homeDir()
-	env := os.Environ()
-	env = setEnv(env, "TERM", "xterm-256color")
-	env = setEnv(env, "HOME", homeDir())
-	env = setEnv(env, "SHELL", shell)
-	cmd.Env = env
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
 		Cols: uint16(req.Cols),
 		Rows: uint16(req.Rows),
@@ -84,7 +106,7 @@ func OpenSession(dialFunc func() (*grpc.ClientConn, error), jwtToken string, req
 	}
 	defer ptmx.Close()
 
-	slog.Info("terminal PTY started", "session_id", sessionID, "shell", shell)
+	slog.Info("terminal PTY started", "session_id", sessionID, "cmd", cmd.Path)
 
 	// Goroutine: read PTY output → send to ingest via gRPC stream
 	ptyDone := make(chan struct{})
@@ -171,6 +193,14 @@ func homeDir() string {
 		return h
 	}
 	return "/root"
+}
+
+// sendClosedMsg sends a TerminalClosedMsg to the ingest service.
+func sendClosedMsg(stream agentv1.IngestService_TerminalClient, sessionID string, exitCode int32) {
+	stream.Send(&agentv1.TerminalAgentMessage{
+		SessionId: sessionID,
+		Payload:   &agentv1.TerminalAgentMessage_Closed{Closed: &agentv1.TerminalClosedMsg{ExitCode: exitCode}},
+	})
 }
 
 // setEnv sets or replaces an environment variable in a slice.

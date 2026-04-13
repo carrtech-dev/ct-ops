@@ -43,13 +43,17 @@ func ValidateAndActivateTerminalSession(ctx context.Context, pool *pgxpool.Pool,
 // GetPendingTerminalSessionsForHost returns terminal sessions that are 'active'
 // (validated by the WebSocket handler) but not yet picked up by the agent.
 // Sessions older than 30 seconds are considered stale and skipped.
+// Includes username and direct_access mode from the organisation settings.
 func GetPendingTerminalSessionsForHost(ctx context.Context, pool *pgxpool.Pool, hostID string) ([]*agentv1.TerminalSessionRequest, error) {
 	const q = `
-		SELECT session_id
-		FROM terminal_sessions
-		WHERE host_id    = $1
-		  AND status     = 'active'
-		  AND started_at > NOW() - INTERVAL '30 seconds'
+		SELECT ts.session_id,
+		       COALESCE(ts.username, '') AS username,
+		       COALESCE((o.metadata->>'terminalDirectAccess')::boolean, false) AS direct_access
+		FROM terminal_sessions ts
+		JOIN organisations o ON o.id = ts.organisation_id
+		WHERE ts.host_id    = $1
+		  AND ts.status     = 'active'
+		  AND ts.started_at > NOW() - INTERVAL '30 seconds'
 	`
 	rows, err := pool.Query(ctx, q, hostID)
 	if err != nil {
@@ -59,14 +63,17 @@ func GetPendingTerminalSessionsForHost(ctx context.Context, pool *pgxpool.Pool, 
 
 	var result []*agentv1.TerminalSessionRequest
 	for rows.Next() {
-		var sessionID string
-		if err := rows.Scan(&sessionID); err != nil {
+		var sessionID, username string
+		var directAccess bool
+		if err := rows.Scan(&sessionID, &username, &directAccess); err != nil {
 			return nil, err
 		}
 		result = append(result, &agentv1.TerminalSessionRequest{
-			SessionId: sessionID,
-			Cols:      80,
-			Rows:      24,
+			SessionId:    sessionID,
+			Cols:         80,
+			Rows:         24,
+			Username:     username,
+			DirectAccess: directAccess,
 		})
 	}
 	return result, rows.Err()

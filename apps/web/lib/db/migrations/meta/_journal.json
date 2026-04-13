@@ -176,6 +176,13 @@
       "when": 1776009599234,
       "tag": "0024_flat_blade",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1776060859671,
+      "tag": "0025_luxuriant_smasher",
+      "breakpoints": true
     }
   ]
 }

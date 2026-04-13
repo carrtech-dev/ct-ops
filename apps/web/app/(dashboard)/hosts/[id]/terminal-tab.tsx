@@ -1,8 +1,10 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback } from 'react'
-import { Loader2, AlertCircle, PlugZap, Unplug } from 'lucide-react'
+import { Loader2, AlertCircle, PlugZap, Unplug, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { createTerminalSession } from '@/lib/actions/terminal'
 import type { HostWithAgent } from '@/lib/actions/agents'
 
@@ -10,11 +12,12 @@ interface Props {
   orgId: string
   host: HostWithAgent
   userId: string
+  directAccess: boolean
 }
 
 type Status = 'idle' | 'connecting' | 'connected' | 'error' | 'closed'
 
-export function TerminalTab({ orgId, host }: Props) {
+export function TerminalTab({ orgId, host, directAccess }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<unknown>(null)
   const fitRef = useRef<unknown>(null)
@@ -22,6 +25,7 @@ export function TerminalTab({ orgId, host }: Props) {
   const cleanupRef = useRef<(() => void) | null>(null)
   const [status, setStatus] = useState<Status>('idle')
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  const [username, setUsername] = useState('')
 
   // Cleanup on unmount
   useEffect(() => {
@@ -38,8 +42,15 @@ export function TerminalTab({ orgId, host }: Props) {
     setStatus('connecting')
     setErrorMsg(null)
 
+    // Validate username when not in direct access mode
+    if (!directAccess && !username.trim()) {
+      setStatus('error')
+      setErrorMsg('Username is required for terminal access')
+      return
+    }
+
     // Create session via server action (access control + DB record)
-    const result = await createTerminalSession(orgId, host.id)
+    const result = await createTerminalSession(orgId, host.id, directAccess ? undefined : username.trim())
     if ('error' in result) {
       setStatus('error')
       setErrorMsg(result.error)
@@ -92,7 +103,11 @@ export function TerminalTab({ orgId, host }: Props) {
       fitAddon.fit()
     })
 
-    term.writeln('\x1b[90mConnecting to ' + (host.displayName ?? host.hostname) + '...\x1b[0m')
+    const hostLabel = host.displayName ?? host.hostname
+    const connectMsg = directAccess
+      ? 'Connecting to ' + hostLabel + '...'
+      : 'Connecting to ' + hostLabel + ' as ' + username.trim() + '...'
+    term.writeln('\x1b[90m' + connectMsg + '\x1b[0m')
 
     // Open WebSocket to ingest
     const ws = new WebSocket(result.ingestWsUrl)
@@ -201,7 +216,7 @@ export function TerminalTab({ orgId, host }: Props) {
       fitRef.current = null
       wsRef.current = null
     }
-  }, [orgId, host.id, host.displayName, host.hostname])
+  }, [orgId, host.id, host.displayName, host.hostname, directAccess, username])
 
   const disconnect = useCallback(() => {
     cleanupRef.current?.()
@@ -222,6 +237,25 @@ export function TerminalTab({ orgId, host }: Props) {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {/* Username input — shown when not in direct access mode and not yet connected */}
+          {!directAccess && (status === 'idle' || status === 'closed' || status === 'error') && (
+            <div className="flex items-center gap-2">
+              <Label htmlFor="terminal-username" className="text-sm text-muted-foreground whitespace-nowrap">
+                <User className="size-3.5 inline mr-1" />
+                Username
+              </Label>
+              <Input
+                id="terminal-username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                placeholder="e.g. jsmith"
+                className="h-8 w-44 text-sm"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && username.trim()) connect()
+                }}
+              />
+            </div>
+          )}
           {status === 'connected' && (
             <Button variant="outline" size="sm" onClick={disconnect}>
               <Unplug className="size-3.5 mr-1.5" />
@@ -229,7 +263,7 @@ export function TerminalTab({ orgId, host }: Props) {
             </Button>
           )}
           {(status === 'idle' || status === 'closed' || status === 'error') && (
-            <Button size="sm" onClick={connect}>
+            <Button size="sm" onClick={connect} disabled={!directAccess && !username.trim()}>
               <PlugZap className="size-3.5 mr-1.5" />
               {status === 'idle' ? 'Connect' : 'Reconnect'}
             </Button>
@@ -277,7 +311,7 @@ export function TerminalTab({ orgId, host }: Props) {
           status === 'error' ? 'bg-red-500' :
           'bg-zinc-500'
         }`} />
-        {status === 'connected' && 'Connected'}
+        {status === 'connected' && (directAccess ? 'Connected' : `Connected as ${username.trim()}`)}
         {status === 'idle' && 'Not connected'}
         {status === 'connecting' && 'Connecting...'}
         {status === 'closed' && 'Disconnected'}

@@ -29,6 +29,8 @@ type TerminalSessionRequest struct {
 	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
 	Cols          uint32                 `protobuf:"varint,2,opt,name=cols,proto3" json:"cols,omitempty"`
 	Rows          uint32                 `protobuf:"varint,3,opt,name=rows,proto3" json:"rows,omitempty"`
+	Username      string                 `protobuf:"bytes,4,opt,name=username,proto3" json:"username,omitempty"`                              // host-level username for su authentication
+	DirectAccess  bool                   `protobuf:"varint,5,opt,name=direct_access,json=directAccess,proto3" json:"direct_access,omitempty"` // true = legacy mode (shell as agent user)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -82,6 +84,20 @@ func (x *TerminalSessionRequest) GetRows() uint32 {
 		return x.Rows
 	}
 	return 0
+}
+
+func (x *TerminalSessionRequest) GetUsername() string {
+	if x != nil {
+		return x.Username
+	}
+	return ""
+}
+
+func (x *TerminalSessionRequest) GetDirectAccess() bool {
+	if x != nil {
+		return x.DirectAccess
+	}
+	return false
 }
 
 type TerminalResizeMsg struct {
@@ -385,12 +401,14 @@ var File_agent_v1_terminal_proto protoreflect.FileDescriptor
 
 const file_agent_v1_terminal_proto_rawDesc = "" +
 	"\n" +
-	"\x17agent/v1/terminal.proto\x12\bagent.v1\"_\n" +
+	"\x17agent/v1/terminal.proto\x12\bagent.v1\"\xa0\x01\n" +
 	"\x16TerminalSessionRequest\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x12\n" +
 	"\x04cols\x18\x02 \x01(\rR\x04cols\x12\x12\n" +
-	"\x04rows\x18\x03 \x01(\rR\x04rows\";\n" +
+	"\x04rows\x18\x03 \x01(\rR\x04rows\x12\x1a\n" +
+	"\busername\x18\x04 \x01(\tR\busername\x12#\n" +
+	"\rdirect_access\x18\x05 \x01(\bR\fdirectAccess\";\n" +
 	"\x11TerminalResizeMsg\x12\x12\n" +
 	"\x04cols\x18\x01 \x01(\rR\x04cols\x12\x12\n" +
 	"\x04rows\x18\x02 \x01(\rR\x04rows\"0\n" +

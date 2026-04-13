@@ -53,6 +53,7 @@ import { SettingsTab } from './settings-tab'
 import { LocalUsersTab } from './local-users-tab'
 import { TasksTab } from './tasks-tab'
 import { TerminalTab } from './terminal-tab'
+import { checkTerminalAccess } from '@/lib/actions/terminal'
 import { getAlertInstances } from '@/lib/actions/alerts'
 import { getHostCollectionSettings } from '@/lib/actions/host-settings'
 import { getServiceAccounts } from '@/lib/actions/service-accounts'
@@ -325,6 +326,12 @@ export function HostDetailClient({ host: initialHost, orgId, currentUserId, user
     queryKey: ['host-groups', orgId],
     queryFn: () => listGroups(orgId),
     enabled: activeTab === 'groups',
+  })
+
+  const { data: terminalAccess } = useQuery({
+    queryKey: ['terminal-access', orgId, initialHost.id],
+    queryFn: () => checkTerminalAccess(orgId, initialHost.id),
+    enabled: activeTab === 'terminal',
   })
 
   const { mutate: doAddToGroup, isPending: isAddingToGroup } = useMutation({
@@ -948,7 +955,12 @@ export function HostDetailClient({ host: initialHost, orgId, currentUserId, user
 
       {/* Terminal Tab */}
       {activeTab === 'terminal' && (
-        <TerminalTab orgId={orgId} host={host} userId={currentUserId} />
+        <TerminalTab
+          orgId={orgId}
+          host={host}
+          userId={currentUserId}
+          directAccess={terminalAccess?.allowed === true ? terminalAccess.directAccess : false}
+        />
       )}
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
