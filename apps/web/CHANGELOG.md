@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.26.0](https://github.com/simonjcarr/infrawatch/compare/web/v0.25.1...web/v0.26.0) (2026-04-13)
+
+
+### Features
+
+* **terminal:** persist tabs across browser refresh ([a8b3dc3](https://github.com/simonjcarr/infrawatch/commit/a8b3dc31c1b4df94427804f0d4ce2a6080915fea))
+* **terminal:** persist tabs across browser refresh via sessionStorage ([94da926](https://github.com/simonjcarr/infrawatch/commit/94da9266ebc81bbb640d74ecdf82b9534eb50d31))
+
 ## [0.25.1](https://github.com/simonjcarr/infrawatch/compare/web/v0.25.0...web/v0.25.1) (2026-04-13)
 
 
