@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useState, useCallback, useRef } from 'react'
+import { createContext, useContext, useState, useCallback } from 'react'
 import { createId } from '@paralleldrive/cuid2'
 
 export interface TerminalTabInfo {
@@ -33,10 +33,6 @@ interface TerminalPanelActions {
   openPanel: () => void
   closePanel: () => void
   setPanelHeight: (height: number) => void
-  /** Signal that a tab's session has been cleaned up — safe to remove from DOM */
-  notifySessionClosed: (tabId: string) => void
-  /** Track which tab IDs have been disposed so TerminalSession can skip re-cleanup */
-  isTabClosing: (tabId: string) => boolean
 }
 
 type TerminalPanelContextValue = TerminalPanelState & TerminalPanelActions
@@ -54,8 +50,6 @@ export function TerminalPanelProvider({ children }: { children: React.ReactNode 
     tabs: [],
     activeTabId: null,
   })
-
-  const closingTabsRef = useRef<Set<string>>(new Set())
 
   const openTerminal = useCallback(
     (params: {
@@ -79,12 +73,10 @@ export function TerminalPanelProvider({ children }: { children: React.ReactNode 
   )
 
   const closeTab = useCallback((tabId: string) => {
-    closingTabsRef.current.add(tabId)
     setState((prev) => {
       const remaining = prev.tabs.filter((t) => t.id !== tabId)
       let nextActive = prev.activeTabId
       if (prev.activeTabId === tabId) {
-        // Activate the tab to the left, or the first remaining, or null
         const closedIdx = prev.tabs.findIndex((t) => t.id === tabId)
         nextActive =
           remaining[Math.max(0, closedIdx - 1)]?.id ?? remaining[0]?.id ?? null
@@ -96,8 +88,6 @@ export function TerminalPanelProvider({ children }: { children: React.ReactNode 
         isOpen: remaining.length > 0 ? prev.isOpen : false,
       }
     })
-    // Clean up after a tick so the session component can read the flag
-    setTimeout(() => closingTabsRef.current.delete(tabId), 100)
   }, [])
 
   const setActiveTab = useCallback((tabId: string) => {
@@ -124,14 +114,6 @@ export function TerminalPanelProvider({ children }: { children: React.ReactNode 
     }))
   }, [])
 
-  const notifySessionClosed = useCallback((_tabId: string) => {
-    // Currently a no-op — placeholder for future cleanup logic
-  }, [])
-
-  const isTabClosing = useCallback((tabId: string) => {
-    return closingTabsRef.current.has(tabId)
-  }, [])
-
   return (
     <TerminalPanelContext.Provider
       value={{
@@ -143,8 +125,6 @@ export function TerminalPanelProvider({ children }: { children: React.ReactNode 
         openPanel,
         closePanel,
         setPanelHeight,
-        notifySessionClosed,
-        isTabClosing,
       }}
     >
       {children}

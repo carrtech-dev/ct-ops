@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useEffect, useCallback, useState } from 'react'
+import { useRef, useEffect, useCallback } from 'react'
 import { createTerminalSession } from '@/lib/actions/terminal'
 import type { TerminalTabInfo } from './terminal-panel-context'
 
@@ -19,11 +19,9 @@ export function TerminalSession({ tab, isVisible, onStatusChange }: Props) {
   const wsRef = useRef<WebSocket | null>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
   const hasConnectedRef = useRef(false)
-  const [status, setStatus] = useState<Status>('connecting')
 
   const updateStatus = useCallback(
     (s: Status) => {
-      setStatus(s)
       onStatusChange?.(tab.id, s)
     },
     [tab.id, onStatusChange],

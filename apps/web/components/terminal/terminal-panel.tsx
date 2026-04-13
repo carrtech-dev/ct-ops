@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import {
   X,
   Plus,
@@ -73,18 +73,6 @@ export function TerminalPanel({ orgId }: Props) {
     },
     [panelHeight, setPanelHeight],
   )
-
-  // Clean up tabStatuses for removed tabs
-  useEffect(() => {
-    const tabIds = new Set(tabs.map((t) => t.id))
-    setTabStatuses((prev) => {
-      const next: Record<string, TabStatus> = {}
-      for (const [id, status] of Object.entries(prev)) {
-        if (tabIds.has(id)) next[id] = status
-      }
-      return next
-    })
-  }, [tabs])
 
   if (tabs.length === 0) {
     return (
