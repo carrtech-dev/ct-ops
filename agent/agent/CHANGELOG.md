@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.21.0](https://github.com/simonjcarr/infrawatch/compare/agent/v0.20.1...agent/v0.21.0) (2026-04-13)
+
+
+### Features
+
+* **terminal:** require per-user host authentication ([8539f5d](https://github.com/simonjcarr/infrawatch/commit/8539f5d450f713e474ec0001ca834ff41b57ab36))
+* **terminal:** require per-user host authentication for terminal sessions ([5a51c21](https://github.com/simonjcarr/infrawatch/commit/5a51c21e97bf1c8c5edfff295aedfb2320b244a8))
+
 ## [0.20.1](https://github.com/simonjcarr/infrawatch/compare/agent/v0.20.0...agent/v0.20.1) (2026-04-12)
 
 
