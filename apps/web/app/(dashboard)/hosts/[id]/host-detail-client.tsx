@@ -49,6 +49,7 @@ import { useChartZoom } from '@/hooks/use-chart-zoom'
 import type { DiskInfo, NetworkInterface } from '@/lib/db/schema'
 import { ChecksTab } from './checks-tab'
 import { AlertsTab } from './alerts-tab'
+import { HostNotificationCharts } from './host-notification-charts'
 import { SettingsTab } from './settings-tab'
 import { LocalUsersTab } from './local-users-tab'
 import { TasksTab } from './tasks-tab'
@@ -754,6 +755,12 @@ export function HostDetailClient({ host: initialHost, orgId, currentUserId, user
                   )}
                 </CardContent>
               </Card>
+
+              <HostNotificationCharts
+                orgId={orgId}
+                userId={currentUserId}
+                hostId={initialHost.id}
+              />
             </>
           )}
         </div>

@@ -163,6 +163,7 @@ export type NotificationSeverityStat = {
 export async function getNotificationStats(
   orgId: string,
   userId: string,
+  hostId?: string,
 ): Promise<NotificationSeverityStat[]> {
   const results = await db
     .select({
@@ -175,6 +176,8 @@ export async function getNotificationStats(
         eq(notifications.organisationId, orgId),
         eq(notifications.userId, userId),
         isNull(notifications.deletedAt),
+        hostId ? eq(notifications.resourceType, 'host') : undefined,
+        hostId ? eq(notifications.resourceId, hostId) : undefined,
       ),
     )
     .groupBy(notifications.severity)
@@ -204,6 +207,7 @@ export async function getNotificationsOverTime(
   orgId: string,
   userId: string,
   range: TrendRange = '30d',
+  hostId?: string,
 ): Promise<NotificationTimeSeriesPoint[]> {
   // Intentionally does NOT filter on deletedAt so that deleting notifications
   // from the inbox does not affect the historical trend.
@@ -230,6 +234,8 @@ export async function getNotificationsOverTime(
         eq(notifications.organisationId, orgId),
         eq(notifications.userId, userId),
         gte(notifications.createdAt, cutoff),
+        hostId ? eq(notifications.resourceType, 'host') : undefined,
+        hostId ? eq(notifications.resourceId, hostId) : undefined,
       ),
     )
     .groupBy(truncGroup, notifications.severity)
