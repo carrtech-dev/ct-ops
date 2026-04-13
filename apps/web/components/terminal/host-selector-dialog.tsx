@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Search, Server, Terminal, User, Loader2, WifiOff } from 'lucide-react'
 import {
@@ -29,11 +29,11 @@ interface Props {
 export function HostSelectorDialog({ open, onOpenChange, orgId }: Props) {
   const [search, setSearch] = useState('')
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null)
-  const [username, setUsername] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
   const { openTerminal } = useTerminalPanel()
   const { data: session } = useSession()
+  const [typedUsername, setTypedUsername] = useState<string | null>(null)
 
   const { data: hosts = [], isLoading } = useQuery({
     queryKey: ['hosts', orgId],
@@ -75,16 +75,17 @@ export function HostSelectorDialog({ open, onOpenChange, orgId }: Props) {
 
   const directAccess = terminalAccess?.allowed === true ? terminalAccess.directAccess : false
 
-  // Pre-fill with last-used username when a host is selected
-  useEffect(() => {
-    if (!selectedHostId || !session?.user?.id) return
+  // Derive last-used username from localStorage (updates when host is selected)
+  const savedUsername = useMemo(() => {
+    if (typeof window === 'undefined' || !session?.user?.id || !selectedHostId) return ''
     try {
-      const saved = localStorage.getItem(`terminal-username:${session.user.id}:${selectedHostId}`)
-      if (saved) setUsername(saved)
+      return localStorage.getItem(`terminal-username:${session.user.id}:${selectedHostId}`) ?? ''
     } catch {
-      // localStorage may be unavailable
+      return ''
     }
-  }, [selectedHostId, session?.user?.id])
+  }, [session?.user?.id, selectedHostId])
+
+  const username = typedUsername ?? savedUsername
 
   const handleConnect = async () => {
     if (!selectedHost) return
@@ -122,7 +123,7 @@ export function HostSelectorDialog({ open, onOpenChange, orgId }: Props) {
     // Reset state and close
     setSearch('')
     setSelectedHostId(null)
-    setUsername('')
+    setTypedUsername(null)
     setError(null)
     setConnecting(false)
     onOpenChange(false)
@@ -130,7 +131,7 @@ export function HostSelectorDialog({ open, onOpenChange, orgId }: Props) {
 
   const handleBack = () => {
     setSelectedHostId(null)
-    setUsername('')
+    setTypedUsername(null)
     setError(null)
   }
 
@@ -138,7 +139,7 @@ export function HostSelectorDialog({ open, onOpenChange, orgId }: Props) {
     if (!nextOpen) {
       setSearch('')
       setSelectedHostId(null)
-      setUsername('')
+      setTypedUsername(null)
       setError(null)
     }
     onOpenChange(nextOpen)
@@ -251,7 +252,7 @@ export function HostSelectorDialog({ open, onOpenChange, orgId }: Props) {
                       id="host-selector-username"
                       value={username}
                       onChange={(e) => {
-                        setUsername(e.target.value)
+                        setTypedUsername(e.target.value)
                         setError(null)
                       }}
                       placeholder="e.g. jsmith"
