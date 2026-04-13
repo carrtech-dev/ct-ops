@@ -1,11 +1,12 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Terminal, User, AlertCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useTerminalPanel } from '@/components/terminal'
+import { useSession } from '@/lib/auth/client'
 import type { HostWithAgent } from '@/lib/actions/agents'
 
 interface Props {
@@ -16,8 +17,21 @@ interface Props {
 }
 
 export function HostTerminalLauncher({ orgId, host, directAccess, accessDeniedReason }: Props) {
-  const [username, setUsername] = useState('')
   const { openTerminal } = useTerminalPanel()
+  const { data: session } = useSession()
+
+  // Derive last-used username from localStorage (updates when session loads)
+  const savedUsername = useMemo(() => {
+    if (typeof window === 'undefined' || !session?.user?.id) return ''
+    try {
+      return localStorage.getItem(`terminal-username:${session.user.id}:${host.id}`) ?? ''
+    } catch {
+      return ''
+    }
+  }, [session?.user?.id, host.id])
+
+  const [typedUsername, setTypedUsername] = useState<string | null>(null)
+  const username = typedUsername ?? savedUsername
 
   if (accessDeniedReason) {
     return (
@@ -30,6 +44,13 @@ export function HostTerminalLauncher({ orgId, host, directAccess, accessDeniedRe
   }
 
   const handleOpen = () => {
+    if (!directAccess && username.trim() && session?.user?.id) {
+      try {
+        localStorage.setItem(`terminal-username:${session.user.id}:${host.id}`, username.trim())
+      } catch {
+        // localStorage may be unavailable
+      }
+    }
     openTerminal({
       hostId: host.id,
       hostname: host.displayName ?? host.hostname,
@@ -71,7 +92,7 @@ export function HostTerminalLauncher({ orgId, host, directAccess, accessDeniedRe
             <Input
               id="host-terminal-username"
               value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              onChange={(e) => setTypedUsername(e.target.value)}
               placeholder="e.g. jsmith"
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && username.trim()) handleOpen()

@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { listHosts } from '@/lib/actions/agents'
 import { checkTerminalAccess } from '@/lib/actions/terminal'
+import { useSession } from '@/lib/auth/client'
 import { useTerminalPanel } from './terminal-panel-context'
 
 interface Props {
@@ -28,10 +29,11 @@ interface Props {
 export function HostSelectorDialog({ open, onOpenChange, orgId }: Props) {
   const [search, setSearch] = useState('')
   const [selectedHostId, setSelectedHostId] = useState<string | null>(null)
-  const [username, setUsername] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [connecting, setConnecting] = useState(false)
   const { openTerminal } = useTerminalPanel()
+  const { data: session } = useSession()
+  const [typedUsername, setTypedUsername] = useState<string | null>(null)
 
   const { data: hosts = [], isLoading } = useQuery({
     queryKey: ['hosts', orgId],
@@ -73,6 +75,18 @@ export function HostSelectorDialog({ open, onOpenChange, orgId }: Props) {
 
   const directAccess = terminalAccess?.allowed === true ? terminalAccess.directAccess : false
 
+  // Derive last-used username from localStorage (updates when host is selected)
+  const savedUsername = useMemo(() => {
+    if (typeof window === 'undefined' || !session?.user?.id || !selectedHostId) return ''
+    try {
+      return localStorage.getItem(`terminal-username:${session.user.id}:${selectedHostId}`) ?? ''
+    } catch {
+      return ''
+    }
+  }, [session?.user?.id, selectedHostId])
+
+  const username = typedUsername ?? savedUsername
+
   const handleConnect = async () => {
     if (!selectedHost) return
 
@@ -89,6 +103,15 @@ export function HostSelectorDialog({ open, onOpenChange, orgId }: Props) {
     setConnecting(true)
     setError(null)
 
+    // Save last-used username for this host
+    if (!directAccess && username.trim() && session?.user?.id && selectedHostId) {
+      try {
+        localStorage.setItem(`terminal-username:${session.user.id}:${selectedHostId}`, username.trim())
+      } catch {
+        // localStorage may be unavailable
+      }
+    }
+
     openTerminal({
       hostId: selectedHost.id,
       hostname: selectedHost.displayName ?? selectedHost.hostname,
@@ -100,7 +123,7 @@ export function HostSelectorDialog({ open, onOpenChange, orgId }: Props) {
     // Reset state and close
     setSearch('')
     setSelectedHostId(null)
-    setUsername('')
+    setTypedUsername(null)
     setError(null)
     setConnecting(false)
     onOpenChange(false)
@@ -108,7 +131,7 @@ export function HostSelectorDialog({ open, onOpenChange, orgId }: Props) {
 
   const handleBack = () => {
     setSelectedHostId(null)
-    setUsername('')
+    setTypedUsername(null)
     setError(null)
   }
 
@@ -116,7 +139,7 @@ export function HostSelectorDialog({ open, onOpenChange, orgId }: Props) {
     if (!nextOpen) {
       setSearch('')
       setSelectedHostId(null)
-      setUsername('')
+      setTypedUsername(null)
       setError(null)
     }
     onOpenChange(nextOpen)
@@ -229,7 +252,7 @@ export function HostSelectorDialog({ open, onOpenChange, orgId }: Props) {
                       id="host-selector-username"
                       value={username}
                       onChange={(e) => {
-                        setUsername(e.target.value)
+                        setTypedUsername(e.target.value)
                         setError(null)
                       }}
                       placeholder="e.g. jsmith"
