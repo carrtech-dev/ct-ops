@@ -52,7 +52,7 @@ import { AlertsTab } from './alerts-tab'
 import { SettingsTab } from './settings-tab'
 import { LocalUsersTab } from './local-users-tab'
 import { TasksTab } from './tasks-tab'
-import { TerminalTab } from './terminal-tab'
+import { HostTerminalLauncher } from './host-terminal-launcher'
 import { checkTerminalAccess } from '@/lib/actions/terminal'
 import { getAlertInstances } from '@/lib/actions/alerts'
 import { getHostCollectionSettings } from '@/lib/actions/host-settings'
@@ -955,11 +955,15 @@ export function HostDetailClient({ host: initialHost, orgId, currentUserId, user
 
       {/* Terminal Tab */}
       {activeTab === 'terminal' && (
-        <TerminalTab
+        <HostTerminalLauncher
           orgId={orgId}
           host={host}
-          userId={currentUserId}
           directAccess={terminalAccess?.allowed === true ? terminalAccess.directAccess : false}
+          accessDeniedReason={
+            terminalAccess && !terminalAccess.allowed && 'reason' in terminalAccess
+              ? terminalAccess.reason
+              : null
+          }
         />
       )}
 
