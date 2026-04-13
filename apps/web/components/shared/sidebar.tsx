@@ -17,6 +17,7 @@ import {
   HeartPulse,
   ChevronRight,
   Layers,
+  Terminal,
 } from 'lucide-react'
 import { Collapsible as CollapsiblePrimitive } from 'radix-ui'
 import {
@@ -35,6 +36,7 @@ import {
   SidebarMenuSubItem,
 } from '@/components/ui/sidebar'
 import { cn } from '@/lib/utils'
+import { TerminalPanelTrigger } from '@/components/terminal'
 import pkg from '../../package.json'
 
 const WEB_VERSION = `v${pkg.version}`
@@ -164,40 +166,48 @@ function CollapsibleNavItem({ item }: { item: NavItem & { children: NavChild[] }
   )
 }
 
-function NavGroup({ label, items }: { label: string; items: NavItem[] }) {
+function NavGroupItems({ items }: { items: NavItem[] }) {
   const pathname = usePathname()
+  return (
+    <>
+      {items.map((item) => {
+        if (item.children && item.children.length > 0) {
+          return <CollapsibleNavItem key={item.href} item={item as NavItem & { children: NavChild[] }} />
+        }
+
+        const isActive =
+          item.href === '/dashboard'
+            ? pathname === '/dashboard'
+            : pathname.startsWith(item.href)
+        return (
+          <SidebarMenuItem key={item.href}>
+            <SidebarMenuButton asChild isActive={isActive}>
+              <Link href={item.href}>
+                <item.icon className={cn('size-4', isActive ? 'text-sidebar-primary' : 'text-sidebar-foreground/70')} />
+                <span>{item.title}</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        )
+      })}
+    </>
+  )
+}
+
+function NavGroup({ label, items }: { label: string; items: NavItem[] }) {
   return (
     <SidebarGroup>
       <SidebarGroupLabel>{label}</SidebarGroupLabel>
       <SidebarGroupContent>
         <SidebarMenu>
-          {items.map((item) => {
-            if (item.children && item.children.length > 0) {
-              return <CollapsibleNavItem key={item.href} item={item as NavItem & { children: NavChild[] }} />
-            }
-
-            const isActive =
-              item.href === '/dashboard'
-                ? pathname === '/dashboard'
-                : pathname.startsWith(item.href)
-            return (
-              <SidebarMenuItem key={item.href}>
-                <SidebarMenuButton asChild isActive={isActive}>
-                  <Link href={item.href}>
-                    <item.icon className={cn('size-4', isActive ? 'text-sidebar-primary' : 'text-sidebar-foreground/70')} />
-                    <span>{item.title}</span>
-                  </Link>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            )
-          })}
+          <NavGroupItems items={items} />
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>
   )
 }
 
-export function AppSidebar() {
+export function AppSidebar({ orgId }: { orgId: string }) {
   return (
     <Sidebar>
       <SidebarHeader className="border-b border-sidebar-border px-4 py-3">
@@ -210,7 +220,17 @@ export function AppSidebar() {
       </SidebarHeader>
       <SidebarContent>
         <NavGroup label="Monitoring" items={primaryNav} />
-        <NavGroup label="Tooling" items={toolingNav} />
+        <SidebarGroup>
+          <SidebarGroupLabel>Tooling</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <NavGroupItems items={toolingNav} />
+              <SidebarMenuItem>
+                <TerminalPanelTrigger orgId={orgId} />
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
         <NavGroup label="Administration" items={adminNav} />
       </SidebarContent>
       <SidebarFooter className="border-t border-sidebar-border p-2">
