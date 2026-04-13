@@ -6,6 +6,7 @@ export interface OrgMetadata {
   defaultCollectionSettings?: HostCollectionSettings
   terminalEnabled?: boolean
   terminalLoggingEnabled?: boolean
+  terminalDirectAccess?: boolean
 }
 
 export const organisations = pgTable('organisations', {

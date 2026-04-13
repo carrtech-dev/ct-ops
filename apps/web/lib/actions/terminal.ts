@@ -11,6 +11,7 @@ const ADMIN_ROLES = ['org_admin', 'super_admin']
 
 export interface TerminalAccessResult {
   allowed: true
+  directAccess: boolean
 }
 
 export interface TerminalAccessDenied {
@@ -63,20 +64,38 @@ export async function checkTerminalAccess(
     return { allowed: false, reason: 'You are not authorised to access this host terminal' }
   }
 
-  return { allowed: true }
+  return { allowed: true, directAccess: orgMeta.terminalDirectAccess === true }
 }
+
+const VALID_USERNAME_RE = /^[a-zA-Z0-9._@\\-]+$/
 
 /**
  * Creates a terminal session record and returns the session ID + ingest WS URL.
  * Performs full access control checks before creating the session.
+ * When not in direct access mode, username is required and validated.
  */
 export async function createTerminalSession(
   orgId: string,
   hostId: string,
+  username?: string,
 ): Promise<{ sessionId: string; ingestWsUrl: string } | { error: string }> {
   const access = await checkTerminalAccess(orgId, hostId)
   if (!access.allowed) {
     return { error: access.reason }
+  }
+
+  // Validate username when not in direct access mode
+  const trimmedUsername = username?.trim()
+  if (!access.directAccess) {
+    if (!trimmedUsername) {
+      return { error: 'Username is required for terminal access' }
+    }
+    if (trimmedUsername.length > 256) {
+      return { error: 'Username is too long' }
+    }
+    if (!VALID_USERNAME_RE.test(trimmedUsername)) {
+      return { error: 'Username contains invalid characters' }
+    }
   }
 
   const session = await getRequiredSession()
@@ -89,6 +108,7 @@ export async function createTerminalSession(
       hostId,
       userId: session.user.id,
       sessionId,
+      username: access.directAccess ? null : (trimmedUsername ?? null),
       status: 'pending',
     })
 
@@ -108,6 +128,7 @@ export async function createTerminalSession(
 export interface OrgTerminalSettings {
   terminalEnabled: boolean
   terminalLoggingEnabled: boolean
+  terminalDirectAccess: boolean
 }
 
 export async function getOrgTerminalSettings(
@@ -121,6 +142,7 @@ export async function getOrgTerminalSettings(
   return {
     terminalEnabled: meta.terminalEnabled !== false,
     terminalLoggingEnabled: meta.terminalLoggingEnabled === true,
+    terminalDirectAccess: meta.terminalDirectAccess === true,
   }
 }
 
@@ -145,6 +167,7 @@ export async function updateOrgTerminalSettings(
       ...currentMetadata,
       terminalEnabled: settings.terminalEnabled,
       terminalLoggingEnabled: settings.terminalLoggingEnabled,
+      terminalDirectAccess: settings.terminalDirectAccess,
     }
 
     await db
