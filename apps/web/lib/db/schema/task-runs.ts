@@ -4,7 +4,7 @@ import { organisations } from './organisations'
 import { hosts } from './hosts'
 import { users } from './auth'
 
-export type TaskType = 'patch' | 'custom_script' | 'service'
+export type TaskType = 'patch' | 'custom_script' | 'service' | 'agent_uninstall'
 export type TaskRunStatus = 'pending' | 'running' | 'cancelling' | 'cancelled' | 'completed' | 'failed'
 export type TaskRunHostStatus = 'pending' | 'running' | 'cancelling' | 'cancelled' | 'success' | 'failed' | 'skipped'
 
@@ -19,7 +19,9 @@ export interface ServiceTaskConfig {
   service_name: string
   action: 'start' | 'stop' | 'restart' | 'status'
 }
-export type TaskConfig = PatchTaskConfig | CustomScriptTaskConfig | ServiceTaskConfig
+// agent_uninstall carries no parameters today; reserved for future flags.
+export type AgentUninstallTaskConfig = Record<string, never>
+export type TaskConfig = PatchTaskConfig | CustomScriptTaskConfig | ServiceTaskConfig | AgentUninstallTaskConfig
 
 // Result shapes
 export interface PackageUpdate {
@@ -39,7 +41,12 @@ export interface ServiceTaskResult {
   action: string
   is_active: boolean
 }
-export type TaskResult = PatchTaskResult | CustomScriptTaskResult | ServiceTaskResult
+// Agent reports "scheduled" once it has handed off to a detached uninstaller process.
+export interface AgentUninstallTaskResult {
+  status: 'scheduled'
+  note?: string
+}
+export type TaskResult = PatchTaskResult | CustomScriptTaskResult | ServiceTaskResult | AgentUninstallTaskResult
 
 export const taskRuns = pgTable('task_runs', {
   id: text('id').primaryKey().$defaultFn(() => createId()),

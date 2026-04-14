@@ -34,6 +34,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
 import {
   Table,
   TableBody,
@@ -42,7 +49,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { getHost, getHostMetrics, getHeartbeatHistory, deleteHost } from '@/lib/actions/agents'
+import { getHost, getHostMetrics, getHeartbeatHistory, deleteHost, uninstallAndDeleteHost } from '@/lib/actions/agents'
 import type { HostWithAgent, MetricsPreset, MetricsQuery, HeartbeatPoint } from '@/lib/actions/agents'
 import { useHostStream } from '@/hooks/use-host-stream'
 import { useChartZoom } from '@/hooks/use-chart-zoom'
@@ -218,6 +225,8 @@ export function HostDetailClient({ host: initialHost, orgId, currentUserId, user
   const [activeTab, setActiveTab] = useState<Tab>('overview')
   const [metricsRange, setMetricsRange] = useState<MetricsPreset>('24h')
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [uninstallAgent, setUninstallAgent] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
   const [addGroupOpen, setAddGroupOpen] = useState(false)
   const router = useRouter()
   const queryClient = useQueryClient()
@@ -249,9 +258,13 @@ export function HostDetailClient({ host: initialHost, orgId, currentUserId, user
     : 720
 
   const { mutate: removeHost, isPending: isDeleting } = useMutation({
-    mutationFn: () => deleteHost(orgId, initialHost.id),
+    mutationFn: (opts: { uninstall: boolean }) =>
+      opts.uninstall
+        ? uninstallAndDeleteHost(orgId, currentUserId, initialHost.id)
+        : deleteHost(orgId, initialHost.id),
     onSuccess: (result) => {
       if ('success' in result) {
+        setDeleteError(null)
         // Cancel and remove all queries for this host before navigating away
         // to stop refetchInterval timers from firing against a deleted resource
         queryClient.cancelQueries({ queryKey: ['host', orgId, initialHost.id] })
@@ -271,6 +284,11 @@ export function HostDetailClient({ host: initialHost, orgId, currentUserId, user
         // Also invalidate the hosts list so it reflects the deletion
         queryClient.invalidateQueries({ queryKey: ['hosts'] })
         router.push('/hosts')
+      } else {
+        // Error case — keep dialog open so user can retry or fall back to
+        // host-only delete (especially important when the uninstall task
+        // failed or timed out).
+        setDeleteError(result.error)
       }
     },
   })
@@ -417,7 +435,11 @@ export function HostDetailClient({ host: initialHost, orgId, currentUserId, user
           <Button
             variant="destructive"
             size="sm"
-            onClick={() => setDeleteOpen(true)}
+            onClick={() => {
+              setDeleteError(null)
+              setUninstallAgent(false)
+              setDeleteOpen(true)
+            }}
             disabled={isDeleting}
           >
             {isDeleting ? (
@@ -974,7 +996,17 @@ export function HostDetailClient({ host: initialHost, orgId, currentUserId, user
         />
       )}
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+      <AlertDialog
+        open={deleteOpen}
+        onOpenChange={(open) => {
+          if (isDeleting) return
+          setDeleteOpen(open)
+          if (!open) {
+            setDeleteError(null)
+            setUninstallAgent(false)
+          }
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete host</AlertDialogTitle>
@@ -985,18 +1017,89 @@ export function HostDetailClient({ host: initialHost, orgId, currentUserId, user
               certificates, users, and SSH keys. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          {/* Remote uninstall option */}
+          <div className="rounded-md border border-border bg-muted/30 p-3">
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <label
+                    className={`flex items-start gap-3 ${
+                      host.agent?.status === 'active'
+                        ? 'cursor-pointer'
+                        : 'cursor-not-allowed opacity-60'
+                    }`}
+                  >
+                    <Checkbox
+                      checked={uninstallAgent}
+                      onCheckedChange={(v) => setUninstallAgent(v === true)}
+                      disabled={isDeleting || host.agent?.status !== 'active'}
+                      className="mt-0.5"
+                    />
+                    <div className="flex-1 text-sm">
+                      <div className="font-medium text-foreground">
+                        Also uninstall agent from the remote host
+                      </div>
+                      <div className="mt-1 text-muted-foreground">
+                        Sends an uninstall command to the agent. The agent will
+                        stop its service, remove the binary, configuration, and
+                        data before the host record is deleted.
+                      </div>
+                      {host.agent?.status !== 'active' && (
+                        <div className="mt-1 text-amber-600 dark:text-amber-400">
+                          Unavailable — the agent must be connected to receive
+                          the uninstall command.
+                        </div>
+                      )}
+                    </div>
+                  </label>
+                </TooltipTrigger>
+                {host.agent?.status !== 'active' && (
+                  <TooltipContent side="top" className="max-w-xs">
+                    The agent is{' '}
+                    {host.agent?.status ?? 'not registered'}. Remote uninstall
+                    requires an active connection.
+                  </TooltipContent>
+                )}
+              </Tooltip>
+            </TooltipProvider>
+          </div>
+
+          {deleteError && (
+            <div
+              role="alert"
+              className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive"
+            >
+              {deleteError}
+              {uninstallAgent && (
+                <div className="mt-2 text-xs text-foreground">
+                  You can uncheck the option above and try again to delete the
+                  host record without uninstalling the agent.
+                </div>
+              )}
+            </div>
+          )}
+
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-red-600 hover:bg-red-700 text-white"
               disabled={isDeleting}
-              onClick={() => removeHost()}
+              onClick={(e) => {
+                // Prevent the dialog from closing automatically on click so we
+                // can keep it open to show the error on failure.
+                e.preventDefault()
+                setDeleteError(null)
+                removeHost({ uninstall: uninstallAgent })
+              }}
             >
               {isDeleting ? (
                 <>
                   <Loader2 className="size-4 mr-1 animate-spin" />
-                  Deleting…
+                  {uninstallAgent ? 'Uninstalling & deleting…' : 'Deleting…'}
                 </>
+              ) : uninstallAgent ? (
+                'Uninstall agent & delete'
               ) : (
                 'Delete permanently'
               )}
