@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.33.2](https://github.com/simonjcarr/infrawatch/compare/web/v0.33.1...web/v0.33.2) (2026-04-14)
+
+
+### Bug Fixes
+
+* **reports:** use sentinel for "All sources" Select value ([423694f](https://github.com/simonjcarr/infrawatch/commit/423694fb94ef362c146e73d181e5c66e03177079))
+* **reports:** use sentinel for "All sources" Select value ([d1efd71](https://github.com/simonjcarr/infrawatch/commit/d1efd712e9c7f456719194f50d85a5222b517592))
+
 ## [0.33.1](https://github.com/simonjcarr/infrawatch/compare/web/v0.33.0...web/v0.33.1) (2026-04-14)
 
 
