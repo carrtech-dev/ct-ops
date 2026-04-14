@@ -16,6 +16,7 @@ import type {
   PatchTaskConfig,
   CustomScriptTaskConfig,
   ServiceTaskConfig,
+  AgentUninstallTaskConfig,
   Host,
 } from '@/lib/db/schema'
 
@@ -414,6 +415,33 @@ export async function triggerGroupServiceAction(
     targetedCount: pendingHostIds.length,
     skippedCount: skipHosts.length,
   }
+}
+
+// ── Agent uninstall action ────────────────────────────────────────────────────
+
+/**
+ * Triggers a remote agent uninstall on a single host.
+ *
+ * The agent handler returns a "scheduled" result as soon as it has staged
+ * a detached uninstaller child process. The actual uninstall completes
+ * out-of-band on the host — see apps/agent/internal/tasks/uninstall.go and
+ * apps/agent/internal/install/uninstall.go.
+ *
+ * Callers that need to delete the host record after the uninstall has been
+ * scheduled should poll task_run_hosts.status and then invoke deleteHost.
+ */
+export async function triggerAgentUninstall(
+  orgId: string,
+  userId: string,
+  hostId: string,
+): Promise<{ success: true; taskRunId: string } | { error: string }> {
+  const host = await db.query.hosts.findFirst({
+    where: and(eq(hosts.id, hostId), eq(hosts.organisationId, orgId), isNull(hosts.deletedAt)),
+  })
+  if (!host) return { error: 'Host not found' }
+
+  const config: AgentUninstallTaskConfig = {}
+  return createTaskRun(orgId, userId, 'host', hostId, 'agent_uninstall', config, 1, [hostId], [])
 }
 
 // ── Deletion ──────────────────────────────────────────────────────────────────

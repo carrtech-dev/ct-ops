@@ -20,11 +20,14 @@ import {
   identityEvents,
   agentQueries,
   resourceTags,
+  taskRuns,
+  taskRunHosts,
 } from '@/lib/db/schema'
 import { eq, and, isNull, gt, gte, lte, asc, sql, inArray } from 'drizzle-orm'
 import type { Agent, AgentEnrolmentToken, Host, HostMetric } from '@/lib/db/schema'
 import { applyGlobalDefaultsToHost } from '@/lib/actions/alerts'
 import { getOrgDefaultCollectionSettings } from '@/lib/actions/host-settings'
+import { triggerAgentUninstall, getTaskRun } from '@/lib/actions/task-runs'
 import type { HostMetadata } from '@/lib/db/schema'
 
 export type OfflinePeriod = { start: number; end: number | null }
@@ -680,6 +683,24 @@ export async function deleteHost(
           eq(resourceTags.organisationId, orgId),
         ))
 
+      // 13a. Task run host rows (FK to hosts; must be removed before the host
+      //      is deleted or the transaction fails). Group-targeted task_runs
+      //      keep their rows for other hosts; host-targeted task_runs are
+      //      then removed as orphans below since they have no remaining rows.
+      await tx
+        .delete(taskRunHosts)
+        .where(and(
+          eq(taskRunHosts.hostId, hostId),
+          eq(taskRunHosts.organisationId, orgId),
+        ))
+      await tx
+        .delete(taskRuns)
+        .where(and(
+          eq(taskRuns.organisationId, orgId),
+          eq(taskRuns.targetType, 'host'),
+          eq(taskRuns.targetId, hostId),
+        ))
+
       // 14. Host itself
       await tx
         .delete(hosts)
@@ -702,5 +723,85 @@ export async function deleteHost(
   } catch (err) {
     console.error('Failed to delete host:', err)
     return { error: 'An unexpected error occurred while deleting the host' }
+  }
+}
+
+/**
+ * Dispatches a remote agent uninstall task and, on success, removes the host
+ * record using the existing deleteHost cascade.
+ *
+ * Flow:
+ *  1. Verify the host exists and its agent is currently active — remote
+ *     uninstall requires the agent to be connected so it can receive the task.
+ *  2. Create a task_run of type 'agent_uninstall' targeting the host.
+ *  3. Poll task_run_hosts.status until 'success' (agent has staged a detached
+ *     uninstaller) or 'failed' / 'cancelled' / 'skipped' / timeout.
+ *  4. On success: run the normal deleteHost cascade.
+ *  5. On failure: return the taskRunId so the UI can offer the user a choice
+ *     between retrying, viewing task history, or deleting the host record only.
+ */
+export async function uninstallAndDeleteHost(
+  orgId: string,
+  userId: string,
+  hostId: string,
+): Promise<
+  | { success: true }
+  | { error: string; taskRunId?: string; agentOffline?: boolean }
+> {
+  try {
+    const host = await db.query.hosts.findFirst({
+      where: and(eq(hosts.id, hostId), eq(hosts.organisationId, orgId)),
+    })
+    if (!host) return { error: 'Host not found' }
+
+    const agent = host.agentId
+      ? await db.query.agents.findFirst({ where: eq(agents.id, host.agentId) })
+      : null
+
+    if (!agent || agent.status !== 'active') {
+      return {
+        error:
+          'Agent is not currently connected — remote uninstall requires an active agent. Delete the host record only if you intend to leave the agent installed on the remote host.',
+        agentOffline: true,
+      }
+    }
+
+    const trigger = await triggerAgentUninstall(orgId, userId, hostId)
+    if ('error' in trigger) return { error: trigger.error }
+
+    // Poll until the agent reports the uninstall as scheduled, or we hit
+    // the overall deadline. Agent typically returns success within a few
+    // seconds because the handler returns as soon as it spawns the detached
+    // uninstaller goroutine.
+    const deadlineMs = Date.now() + 45_000
+    let reachedSuccess = false
+    while (Date.now() < deadlineMs) {
+      const run = await getTaskRun(orgId, trigger.taskRunId)
+      const hostRun = run?.hosts[0]
+      if (hostRun?.status === 'success') {
+        reachedSuccess = true
+        break
+      }
+      if (hostRun && ['failed', 'cancelled', 'skipped'].includes(hostRun.status)) {
+        return {
+          error: `Uninstall task did not complete (status: ${hostRun.status}). Host record was not deleted.`,
+          taskRunId: trigger.taskRunId,
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+    }
+
+    if (!reachedSuccess) {
+      return {
+        error:
+          'Timed out waiting for the agent to acknowledge the uninstall task. Host record was not deleted.',
+        taskRunId: trigger.taskRunId,
+      }
+    }
+
+    return await deleteHost(orgId, hostId)
+  } catch (err) {
+    console.error('Failed to uninstall agent and delete host:', err)
+    return { error: 'An unexpected error occurred while uninstalling the agent' }
   }
 }
