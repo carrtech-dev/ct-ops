@@ -42,7 +42,9 @@ type WebhookChannelRow struct {
 }
 
 // GetAlertRulesForHost returns all enabled, non-deleted alert rules scoped to the
-// given host OR org-wide (host_id IS NULL).
+// given host OR org-wide (host_id IS NULL, isGlobalDefault = false).
+// Global defaults (is_global_default = true) are excluded — they are cloned as
+// host-specific rules at approval time and must not be double-evaluated.
 func GetAlertRulesForHost(ctx context.Context, pool *pgxpool.Pool, orgID, hostID string) ([]AlertRuleRow, error) {
 	const q = `
 		SELECT id, host_id, organisation_id, name, condition_type, config::text, severity
@@ -50,6 +52,7 @@ func GetAlertRulesForHost(ctx context.Context, pool *pgxpool.Pool, orgID, hostID
 		WHERE organisation_id = $1
 		  AND enabled = true
 		  AND deleted_at IS NULL
+		  AND is_global_default = false
 		  AND (host_id = $2 OR host_id IS NULL)
 	`
 	rows, err := pool.Query(ctx, q, orgID, hostID)

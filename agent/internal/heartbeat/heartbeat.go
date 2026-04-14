@@ -48,6 +48,13 @@ type Runner struct {
 	prevCPUIdle    uint64
 	prevCPUSampled bool
 
+	// cachedMetrics holds the most recently collected system metrics.
+	// It is updated only on regular ticker fires and the initial startup
+	// heartbeat. Immediate heartbeats triggered by resultsReady reuse these
+	// values so that the CPU delta is always measured over a full tick interval
+	// rather than a near-zero window that would inflate the reading to 100%.
+	cachedMetrics hostMetricsSnapshot
+
 	// Buffered ad-hoc query results, drained on each heartbeat send.
 	queryResultsMu sync.Mutex
 	queryResults   []*agentv1.AgentQueryResult
@@ -184,7 +191,8 @@ func (r *Runner) runStream(ctx context.Context) error {
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
 
-	// Send first heartbeat immediately
+	// Collect metrics and send first heartbeat immediately.
+	r.refreshMetrics()
 	if err := r.sendHeartbeat(stream); err != nil {
 		return err
 	}
@@ -200,13 +208,18 @@ func (r *Runner) runStream(ctx context.Context) error {
 			return err
 
 		case <-ticker.C:
+			// Full metric refresh on every scheduled tick.
+			r.refreshMetrics()
 			if err := r.sendHeartbeat(stream); err != nil {
 				return err
 			}
 
 		case <-r.resultsReady:
-			// A query result is waiting — fire an immediate heartbeat rather
-			// than making the user wait up to 30s for the next tick.
+			// A check/task result is ready — fire an immediate heartbeat to
+			// deliver it without waiting up to 30s for the next tick.
+			// Do NOT refresh metrics here: the CPU delta since the last tick
+			// would be near-zero, inflating the reading towards 100%.
+			// sendHeartbeat reuses the cached values from the last tick.
 			if err := r.sendHeartbeat(stream); err != nil {
 				return err
 			}
@@ -437,22 +450,50 @@ func (r *Runner) drainTaskResults() []*agentv1.AgentTaskResult {
 	return results
 }
 
-func (r *Runner) sendHeartbeat(stream agentv1.IngestService_HeartbeatClient) error {
-	cpu, mem, disk, uptime, osVersion, disks, nets := r.collectMetrics()
+// hostMetricsSnapshot holds a point-in-time snapshot of system metrics.
+type hostMetricsSnapshot struct {
+	cpu       float32
+	memory    float32
+	disk      float32
+	uptime    int64
+	osVersion string
+	disks     []*agentv1.DiskInfo
+	nets      []*agentv1.NetworkInterface
+}
 
+// refreshMetrics collects fresh system metrics and stores them in the cache.
+// Call this only on regular ticker fires (and the initial startup heartbeat) so
+// that the CPU delta is always measured over a full tick interval. Immediate
+// heartbeats triggered by resultsReady must NOT call this — they must reuse the
+// cached values to avoid inflating CPU% to ~100% from a near-zero delta window.
+func (r *Runner) refreshMetrics() {
+	cpu, mem, disk, uptime, osVersion, disks, nets := r.collectMetrics()
+	r.cachedMetrics = hostMetricsSnapshot{
+		cpu:       cpu,
+		memory:    mem,
+		disk:      disk,
+		uptime:    uptime,
+		osVersion: osVersion,
+		disks:     disks,
+		nets:      nets,
+	}
+}
+
+func (r *Runner) sendHeartbeat(stream agentv1.IngestService_HeartbeatClient) error {
+	m := r.cachedMetrics
 	req := &agentv1.HeartbeatRequest{
 		AgentId:           r.agentID,
-		CpuPercent:        cpu,
-		MemoryPercent:     mem,
-		DiskPercent:       disk,
-		UptimeSeconds:     uptime,
+		CpuPercent:        m.cpu,
+		MemoryPercent:     m.memory,
+		DiskPercent:       m.disk,
+		UptimeSeconds:     m.uptime,
 		TimestampUnix:     time.Now().Unix(),
 		AgentVersion:      r.version,
-		OsVersion:         osVersion,
+		OsVersion:         m.osVersion,
 		Os:                runtime.GOOS,
 		Arch:              runtime.GOARCH,
-		Disks:             disks,
-		NetworkInterfaces: nets,
+		Disks:             m.disks,
+		NetworkInterfaces: m.nets,
 		CheckResults:      r.executor.DrainResults(),
 		QueryResults:      r.drainQueryResults(),
 		TaskProgress:      r.drainTaskProgress(),
@@ -501,6 +542,8 @@ func readUptime() int64 {
 
 // readCPUPercent returns the CPU usage percentage using a two-sample delta
 // from /proc/stat. Returns 0 on the first call (stores the baseline sample).
+// This must only be called via refreshMetrics() which is invoked on the regular
+// ticker, ensuring the delta always spans a full tick interval.
 func (r *Runner) readCPUPercent() float32 {
 	data, err := os.ReadFile("/proc/stat")
 	if err != nil {

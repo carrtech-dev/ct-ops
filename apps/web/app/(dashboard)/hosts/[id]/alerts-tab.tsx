@@ -37,6 +37,7 @@ import {
 } from '@/components/ui/table'
 import {
   getAlertRules,
+  getGlobalAlertDefaults,
   createAlertRule,
   updateAlertRule,
   deleteAlertRule,
@@ -545,6 +546,12 @@ export function AlertsTab({ orgId, hostId, currentUserId }: Props) {
     refetchInterval: 30_000,
   })
 
+  const { data: globalDefaults = [] } = useQuery({
+    queryKey: ['alert-global-defaults', orgId],
+    queryFn: () => getGlobalAlertDefaults(orgId),
+    refetchInterval: 60_000,
+  })
+
   const { data: activeAlerts = [] } = useQuery({
     queryKey: ['alerts', orgId, 'firing', hostId],
     queryFn: () => getAlertInstances(orgId, { status: 'firing', hostId }),
@@ -558,7 +565,6 @@ export function AlertsTab({ orgId, hostId, currentUserId }: Props) {
   })
 
   const hostRules = allRules.filter((r) => r.hostId === hostId)
-  const orgWideRules = allRules.filter((r) => r.hostId === null)
 
   const toggleMutation = useMutation({
     mutationFn: ({ ruleId, enabled }: { ruleId: string; enabled: boolean }) =>
@@ -695,14 +701,27 @@ export function AlertsTab({ orgId, hostId, currentUserId }: Props) {
         </CardContent>
       </Card>
 
-      {/* Org-wide rules (read-only) */}
-      {orgWideRules.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Organisation-wide Rules</CardTitle>
-            <CardDescription>These rules apply to all hosts in your organisation</CardDescription>
-          </CardHeader>
-          <CardContent>
+      {/* Global default rules (read-only) — these also apply to this host */}
+      <Card>
+        <CardHeader>
+          <div>
+            <CardTitle className="text-base">Organisation-wide Default Rules</CardTitle>
+            <CardDescription className="mt-1">
+              These rules apply to <strong>all hosts</strong> in your organisation and are
+              evaluated in addition to the host-specific rules above.{' '}
+              <a href="/settings/alerts" className="underline underline-offset-2">
+                Manage in Settings → Alerts
+              </a>
+              .
+            </CardDescription>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {globalDefaults.length === 0 ? (
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              No organisation-wide default rules configured.
+            </p>
+          ) : (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -710,11 +729,10 @@ export function AlertsTab({ orgId, hostId, currentUserId }: Props) {
                   <TableHead>Condition</TableHead>
                   <TableHead>Severity</TableHead>
                   <TableHead>Enabled</TableHead>
-                  <TableHead>Created</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {orgWideRules.map((rule) => (
+                {globalDefaults.map((rule) => (
                   <TableRow key={rule.id}>
                     <TableCell className="font-medium">{rule.name}</TableCell>
                     <TableCell className="text-sm text-muted-foreground">
@@ -726,16 +744,13 @@ export function AlertsTab({ orgId, hostId, currentUserId }: Props) {
                     <TableCell>
                       <Switch checked={rule.enabled} disabled />
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {formatDistanceToNow(new Date(rule.createdAt), { addSuffix: true })}
-                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </CardContent>
+      </Card>
 
       <AddRuleDialog
         orgId={orgId}
