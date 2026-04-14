@@ -9,11 +9,23 @@
 **Phase 5 — Tooling (in progress)**
 
 ## Current Status
-🟢 Phase 5 progressing — Notifications significantly enhanced: bulk actions (select-all, bulk mark read/unread, bulk delete), severity pie chart and notification trend line chart on the /notifications page, soft-delete to preserve trend history, time-range dropdown on the trend chart (1h → 3 months), and both charts replicated on the host detail Metrics tab filtered per-host.
+🟢 Phase 5 progressing — Terminal panel pinned to viewport bottom; dashboard layout bounded to `h-svh` so the persistent terminal never scrolls off-screen on long pages.
 
 ---
 
 ## What Has Been Built
+
+### Session 36 — Terminal panel viewport fix
+
+**Dashboard layout** (`apps/web/app/(dashboard)/layout.tsx`)
+- `SidebarProvider` container changed from `min-h-svh` to `h-svh overflow-hidden` — bounds the entire dashboard to the viewport height
+- The main content area already uses `overflow-auto` so page content still scrolls internally; the terminal panel stays pinned at the bottom on all pages regardless of content length
+- PR: simonjcarr/infrawatch#165 (`feature/terminal-fixed-bottom`)
+
+**Build state**
+- `pnpm run build` — zero TypeScript errors ✅
+
+---
 
 ### Session 35 — Notification enhancements: bulk actions, charts, soft-delete, and host metrics integration
 
