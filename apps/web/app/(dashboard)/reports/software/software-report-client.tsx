@@ -85,8 +85,10 @@ const VERSION_MODE_LABELS: Record<VersionMode, string> = {
   between: 'Between',
 }
 
+const ALL_SOURCES = '__all__'
+
 const SOURCE_OPTIONS = [
-  { value: '', label: 'All sources' },
+  { value: ALL_SOURCES, label: 'All sources' },
   { value: 'dpkg', label: 'dpkg (Debian/Ubuntu)' },
   { value: 'rpm', label: 'rpm (RHEL/Fedora)' },
   { value: 'pacman', label: 'pacman (Arch)' },
@@ -421,8 +423,11 @@ export function SoftwareReportClient({ orgId, orgName, hostGroups }: Props) {
               <div className="space-y-1">
                 <Label className="text-xs">Source</Label>
                 <Select
-                  value={sourceFilter}
-                  onValueChange={(v) => { setSourceFilter(v); setPage('1') }}
+                  value={sourceFilter || ALL_SOURCES}
+                  onValueChange={(v) => {
+                    setSourceFilter(v === ALL_SOURCES ? '' : v)
+                    setPage('1')
+                  }}
                 >
                   <SelectTrigger className="h-8 text-sm w-[180px]">
                     <SelectValue />
