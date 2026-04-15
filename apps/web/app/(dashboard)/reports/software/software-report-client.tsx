@@ -1,28 +1,24 @@
 'use client'
 
-import { Fragment, useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useQueryState } from 'nuqs'
 import { formatDistanceToNow } from 'date-fns'
 import {
   Search,
   Download,
-  ChevronDown,
-  ChevronRight,
   Save,
   Trash2,
   Loader2,
   Package,
   TrendingUp,
   GitBranch,
-  AlertTriangle,
   X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Select,
   SelectContent,
@@ -42,7 +38,6 @@ import {
   Command,
   CommandEmpty,
   CommandGroup,
-  CommandInput,
   CommandItem,
   CommandList,
 } from '@/components/ui/command'
@@ -59,15 +54,17 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import {
-  getSoftwareReport,
   searchPackageNames,
+  getPackageDetails,
+  getPackageVersions,
   getNewPackages,
   getPackageDrift,
   listSavedReports,
   saveSoftwareReport,
   deleteSavedReport,
 } from '@/lib/actions/software-inventory'
-import type { SoftwareReportFilters, SoftwareReportRow, VersionMode } from '@/lib/actions/software-inventory'
+import type { SoftwareReportFilters, VersionMode } from '@/lib/actions/software-inventory'
+import { compareVersions } from '@/lib/version-compare'
 import type { HostGroup } from '@/lib/db/schema'
 
 interface Props {
@@ -85,19 +82,13 @@ const VERSION_MODE_LABELS: Record<VersionMode, string> = {
   between: 'Between',
 }
 
-const ALL_SOURCES = '__all__'
+const ALL_OS = '__all__'
 
-const SOURCE_OPTIONS = [
-  { value: ALL_SOURCES, label: 'All sources' },
-  { value: 'dpkg', label: 'dpkg (Debian/Ubuntu)' },
-  { value: 'rpm', label: 'rpm (RHEL/Fedora)' },
-  { value: 'pacman', label: 'pacman (Arch)' },
-  { value: 'apk', label: 'apk (Alpine)' },
-  { value: 'winreg', label: 'Windows Registry' },
-  { value: 'homebrew', label: 'Homebrew (macOS)' },
-  { value: 'snap', label: 'Snap' },
-  { value: 'flatpak', label: 'Flatpak' },
-  { value: 'macapps', label: 'macOS Apps' },
+const OS_OPTIONS = [
+  { value: ALL_OS, label: 'All OS types' },
+  { value: 'linux', label: 'Linux' },
+  { value: 'darwin', label: 'macOS' },
+  { value: 'windows', label: 'Windows' },
 ]
 
 
@@ -115,13 +106,12 @@ export function SoftwareReportClient({ orgId, orgName, hostGroups }: Props) {
   const [versionPrefix, setVersionPrefix] = useQueryState('vp', { defaultValue: '' })
   const [versionLow, setVersionLow] = useQueryState('vl', { defaultValue: '' })
   const [versionHigh, setVersionHigh] = useQueryState('vh', { defaultValue: '' })
-  const [sourceFilter, setSourceFilter] = useQueryState('src', { defaultValue: '' })
+  const [osFamilyFilter, setOsFamilyFilter] = useQueryState('of', { defaultValue: '' })
   const [page, setPage] = useQueryState('p', { defaultValue: '1' })
 
   // Local state
   const [nameInput, setNameInput] = useState(nameParam)
   const [namePopoverOpen, setNamePopoverOpen] = useState(false)
-  const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set())
   const [saveDialogOpen, setSaveDialogOpen] = useState(false)
   const [saveName, setSaveName] = useState('')
   const [savedReportsOpen, setSavedReportsOpen] = useState(false)
@@ -134,7 +124,7 @@ export function SoftwareReportClient({ orgId, orgName, hostGroups }: Props) {
     versionPrefix: versionPrefix || undefined,
     versionLow: versionLow || undefined,
     versionHigh: versionHigh || undefined,
-    source: sourceFilter || undefined,
+    osFamily: osFamilyFilter || undefined,
     page: parseInt(page, 10),
     pageSize: 50,
   }
@@ -147,11 +137,19 @@ export function SoftwareReportClient({ orgId, orgName, hostGroups }: Props) {
     staleTime: 10_000,
   })
 
-  // Main report
-  const { data: report, isLoading: reportLoading } = useQuery({
-    queryKey: ['software-report', orgId, filters],
-    queryFn: () => getSoftwareReport(orgId, filters),
-    enabled: activeView === 'search',
+  // Package details (shown when a package is selected)
+  const { data: packageDetails, isLoading: detailsLoading } = useQuery({
+    queryKey: ['package-details', orgId, nameParam, osFamilyFilter],
+    queryFn: () => getPackageDetails(orgId, nameParam, osFamilyFilter || undefined),
+    enabled: activeView === 'search' && !!nameParam,
+    staleTime: 30_000,
+  })
+
+  // Available versions for the exact-version dropdown
+  const { data: availableVersions = [] } = useQuery({
+    queryKey: ['package-versions', orgId, nameParam],
+    queryFn: () => getPackageVersions(orgId, nameParam),
+    enabled: activeView === 'search' && !!nameParam && versionMode === 'exact',
     staleTime: 30_000,
   })
 
@@ -203,7 +201,7 @@ export function SoftwareReportClient({ orgId, orgName, hostGroups }: Props) {
     setVersionPrefix(f.versionPrefix ?? '')
     setVersionLow(f.versionLow ?? '')
     setVersionHigh(f.versionHigh ?? '')
-    setSourceFilter(f.source ?? '')
+    setOsFamilyFilter(f.osFamily ?? '')
     setPage('1')
   }
 
@@ -222,21 +220,28 @@ export function SoftwareReportClient({ orgId, orgName, hostGroups }: Props) {
     if (filters.versionPrefix) params.set('vp', filters.versionPrefix)
     if (filters.versionLow) params.set('vl', filters.versionLow)
     if (filters.versionHigh) params.set('vh', filters.versionHigh)
-    if (filters.source) params.set('src', filters.source)
+    if (filters.osFamily) params.set('of', filters.osFamily)
     window.open(`/api/reports/software/export?${params.toString()}`, '_blank')
   }
 
-  function toggleRowExpanded(key: string) {
-    setExpandedRows((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
-
-  const currentPage = parseInt(page, 10)
-  const totalPages = report ? Math.ceil(report.total / 50) : 0
+// Client-side version filtering of package detail groups
+  const displayedGroups = useMemo(() => {
+    const groups = packageDetails?.versionGroups ?? []
+    if (versionMode === 'exact' && versionExact) {
+      return groups.filter((g) => g.version === versionExact)
+    }
+    if (versionMode === 'prefix' && versionPrefix) {
+      return groups.filter((g) => g.version.startsWith(versionPrefix))
+    }
+    if (versionMode === 'between' && versionLow && versionHigh) {
+      return groups.filter(
+        (g) =>
+          compareVersions(g.version, versionLow) >= 0 &&
+          compareVersions(g.version, versionHigh) <= 0,
+      )
+    }
+    return groups
+  }, [packageDetails, versionMode, versionExact, versionPrefix, versionLow, versionHigh])
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -290,7 +295,7 @@ export function SoftwareReportClient({ orgId, orgName, hostGroups }: Props) {
           {/* Filters */}
           <div className="space-y-3 p-4 rounded-lg border bg-muted/30">
             <div className="flex flex-wrap gap-3 items-end">
-              {/* Package name typeahead */}
+              {/* Package name combobox */}
               <div className="space-y-1 min-w-[220px]">
                 <Label className="text-xs">Package name</Label>
                 <Popover open={namePopoverOpen && nameInput.length >= 2} onOpenChange={setNamePopoverOpen}>
@@ -303,13 +308,14 @@ export function SoftwareReportClient({ orgId, orgName, hostGroups }: Props) {
                         value={nameInput}
                         onChange={(e) => {
                           setNameInput(e.target.value)
+                          if (!e.target.value) {
+                            setNameParam('')
+                          }
                           setNamePopoverOpen(e.target.value.length >= 2)
                         }}
                         onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            setNameParam(nameInput)
+                          if (e.key === 'Escape') {
                             setNamePopoverOpen(false)
-                            setPage('1')
                           }
                         }}
                       />
@@ -327,7 +333,11 @@ export function SoftwareReportClient({ orgId, orgName, hostGroups }: Props) {
                       )}
                     </div>
                   </PopoverTrigger>
-                  <PopoverContent className="p-0 w-[300px]" align="start">
+                  <PopoverContent
+                    className="p-0 w-[300px]"
+                    align="start"
+                    onOpenAutoFocus={(e) => e.preventDefault()}
+                  >
                     <Command>
                       <CommandList>
                         <CommandEmpty>No packages found.</CommandEmpty>
@@ -340,6 +350,7 @@ export function SoftwareReportClient({ orgId, orgName, hostGroups }: Props) {
                                 setNameInput(v)
                                 setNameParam(v)
                                 setNamePopoverOpen(false)
+                                setVersionExact('')
                                 setPage('1')
                               }}
                             >
@@ -361,7 +372,7 @@ export function SoftwareReportClient({ orgId, orgName, hostGroups }: Props) {
                 <Label className="text-xs">Version filter</Label>
                 <Select
                   value={versionMode}
-                  onValueChange={(v) => { setVersionMode(v as VersionMode); setPage('1') }}
+                  onValueChange={(v) => { setVersionMode(v as VersionMode); setVersionExact(''); setPage('1') }}
                 >
                   <SelectTrigger className="h-8 text-sm w-[140px]">
                     <SelectValue />
@@ -377,12 +388,31 @@ export function SoftwareReportClient({ orgId, orgName, hostGroups }: Props) {
               {versionMode === 'exact' && (
                 <div className="space-y-1">
                   <Label className="text-xs">Version</Label>
-                  <Input
-                    className="h-8 text-sm w-32"
-                    placeholder="e.g. 1.2.3"
-                    value={versionExact}
-                    onChange={(e) => { setVersionExact(e.target.value); setPage('1') }}
-                  />
+                  {nameParam && availableVersions.length > 0 ? (
+                    <Select
+                      value={versionExact || '__any__'}
+                      onValueChange={(v) => { setVersionExact(v === '__any__' ? '' : v); setPage('1') }}
+                    >
+                      <SelectTrigger className="h-8 text-sm w-44">
+                        <SelectValue placeholder="Select version" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__any__">Any exact version</SelectItem>
+                        {availableVersions.map((v) => (
+                          <SelectItem key={v} value={v}>
+                            <span className="font-mono">{v}</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input
+                      className="h-8 text-sm w-36"
+                      placeholder="e.g. 1.2.3"
+                      value={versionExact}
+                      onChange={(e) => { setVersionExact(e.target.value); setPage('1') }}
+                    />
+                  )}
                 </div>
               )}
               {versionMode === 'prefix' && (
@@ -419,21 +449,21 @@ export function SoftwareReportClient({ orgId, orgName, hostGroups }: Props) {
                 </>
               )}
 
-              {/* Source filter */}
+              {/* OS type filter */}
               <div className="space-y-1">
-                <Label className="text-xs">Source</Label>
+                <Label className="text-xs">OS type</Label>
                 <Select
-                  value={sourceFilter || ALL_SOURCES}
+                  value={osFamilyFilter || ALL_OS}
                   onValueChange={(v) => {
-                    setSourceFilter(v === ALL_SOURCES ? '' : v)
+                    setOsFamilyFilter(v === ALL_OS ? '' : v)
                     setPage('1')
                   }}
                 >
-                  <SelectTrigger className="h-8 text-sm w-[180px]">
+                  <SelectTrigger className="h-8 text-sm w-[140px]">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {SOURCE_OPTIONS.map((o) => (
+                    {OS_OPTIONS.map((o) => (
                       <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
                     ))}
                   </SelectContent>
@@ -449,152 +479,114 @@ export function SoftwareReportClient({ orgId, orgName, hostGroups }: Props) {
             )}
           </div>
 
-          {/* Summary bar */}
-          {report && (
-            <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
-              <span>
-                <span className="font-medium text-foreground">{report.total.toLocaleString()}</span> result{report.total === 1 ? '' : 's'}
-              </span>
-              <span>
-                <span className="font-medium text-foreground">{report.uniquePackages.toLocaleString()}</span> unique packages
-              </span>
-              <span>
-                <span className="font-medium text-foreground">{report.hostsWithData.toLocaleString()}</span> hosts with data
-              </span>
-              <div className="ml-auto flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setSaveDialogOpen(true)}
-                  disabled={!filters.name && versionMode === 'any' && !sourceFilter}
-                >
-                  <Save className="size-3.5 mr-1.5" />
-                  Save filters
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => handleExport('csv')}>
-                  <Download className="size-3.5 mr-1.5" />
-                  CSV
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => handleExport('pdf')}>
-                  <Download className="size-3.5 mr-1.5" />
-                  PDF
-                </Button>
-              </div>
-            </div>
-          )}
-
-          {/* Results table */}
-          {reportLoading ? (
-            <div className="flex items-center gap-2 text-muted-foreground py-8 justify-center">
-              <Loader2 className="size-4 animate-spin" />
-              <span className="text-sm">Loading…</span>
-            </div>
-          ) : report && report.rows.length > 0 ? (
+          {/* Package details (shown when a package is selected) */}
+          {nameParam ? (
             <>
-              <div className="rounded-md border overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-8" />
-                      <TableHead>Package</TableHead>
-                      <TableHead>Version</TableHead>
-                      <TableHead>Hosts</TableHead>
-                      <TableHead>Sources</TableHead>
-                      <TableHead>Hosts preview</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {report.rows.map((row) => {
-                      const key = `${row.name}\0${row.version}`
-                      const expanded = expandedRows.has(key)
-                      return (
-                        <Fragment key={key}>
-                          <TableRow
-                            className="cursor-pointer hover:bg-muted/50"
-                            onClick={() => toggleRowExpanded(key)}
-                          >
-                            <TableCell>
-                              {expanded ? (
-                                <ChevronDown className="size-3.5 text-muted-foreground" />
-                              ) : (
-                                <ChevronRight className="size-3.5 text-muted-foreground" />
-                              )}
-                            </TableCell>
-                            <TableCell className="font-mono text-sm font-medium">{row.name}</TableCell>
-                            <TableCell className="font-mono text-sm">{row.version}</TableCell>
-                            <TableCell>
-                              <Badge variant="secondary">{row.hostCount}</Badge>
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex gap-1 flex-wrap">
-                                {row.sources.map((s) => (
-                                  <Badge key={s} variant="outline" className="text-xs">
-                                    {s}
-                                  </Badge>
-                                ))}
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-xs text-muted-foreground">
-                              {row.hostNames.slice(0, 3).join(', ')}
-                              {row.hostNames.length > 3 && ` +${row.hostNames.length - 3} more`}
-                            </TableCell>
+              {/* Action bar */}
+              <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
+                {packageDetails && (
+                  <>
+                    <span>
+                      <span className="font-medium text-foreground">{packageDetails.totalHosts.toLocaleString()}</span>{' '}
+                      host{packageDetails.totalHosts === 1 ? '' : 's'} with this package
+                    </span>
+                    <span>
+                      <span className="font-medium text-foreground">{packageDetails.versionGroups.length}</span>{' '}
+                      version{packageDetails.versionGroups.length === 1 ? '' : 's'}
+                    </span>
+                  </>
+                )}
+                <div className="ml-auto flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setSaveDialogOpen(true)}
+                    disabled={!filters.name}
+                  >
+                    <Save className="size-3.5 mr-1.5" />
+                    Save filters
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => handleExport('csv')}>
+                    <Download className="size-3.5 mr-1.5" />
+                    CSV
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => handleExport('pdf')}>
+                    <Download className="size-3.5 mr-1.5" />
+                    PDF
+                  </Button>
+                </div>
+              </div>
+
+              {detailsLoading ? (
+                <div className="flex items-center gap-2 text-muted-foreground py-8 justify-center">
+                  <Loader2 className="size-4 animate-spin" />
+                  <span className="text-sm">Loading…</span>
+                </div>
+              ) : displayedGroups.length > 0 ? (
+                <div className="space-y-4">
+                  {displayedGroups.map((group) => (
+                    <div key={group.version} className="rounded-md border overflow-hidden">
+                      <div className="flex items-center gap-3 px-4 py-2.5 bg-muted/40 border-b">
+                        <span className="font-mono text-sm font-semibold text-foreground">
+                          {nameParam}
+                        </span>
+                        <Badge variant="outline" className="font-mono text-xs">
+                          {group.version}
+                        </Badge>
+                        <Badge variant="secondary" className="text-xs">
+                          {group.hosts.length} host{group.hosts.length === 1 ? '' : 's'}
+                        </Badge>
+                      </div>
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Host</TableHead>
+                            <TableHead>OS</TableHead>
+                            <TableHead>Source</TableHead>
+                            <TableHead>Architecture</TableHead>
+                            <TableHead>Last seen</TableHead>
                           </TableRow>
-                          {expanded && (
-                            <TableRow>
-                              <TableCell colSpan={6} className="bg-muted/30 px-8 py-3">
-                                <p className="text-xs font-medium text-muted-foreground mb-2">
-                                  All hosts with {row.name} {row.version}
-                                </p>
-                                <div className="flex flex-wrap gap-1.5">
-                                  {row.hostNames.map((name, i) => (
-                                    <Badge key={i} variant="outline" className="text-xs font-normal">
-                                      {name}
-                                    </Badge>
-                                  ))}
-                                </div>
+                        </TableHeader>
+                        <TableBody>
+                          {group.hosts.map((host) => (
+                            <TableRow key={host.hostId}>
+                              <TableCell className="font-medium text-sm">
+                                {host.displayName ?? host.hostname}
+                              </TableCell>
+                              <TableCell className="text-sm text-muted-foreground">
+                                {host.osVersion ?? host.os ?? '—'}
+                              </TableCell>
+                              <TableCell>
+                                <Badge variant="outline" className="text-xs">
+                                  {host.source}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="text-xs text-muted-foreground">
+                                {host.architecture ?? '—'}
+                              </TableCell>
+                              <TableCell className="text-xs text-muted-foreground">
+                                {formatDistanceToNow(new Date(host.lastSeenAt), { addSuffix: true })}
                               </TableCell>
                             </TableRow>
-                          )}
-                        </Fragment>
-                      )
-                    })}
-                  </TableBody>
-                </Table>
-              </div>
-
-              {/* Pagination */}
-              {totalPages > 1 && (
-                <div className="flex items-center justify-between">
-                  <p className="text-sm text-muted-foreground">
-                    Page {currentPage} of {totalPages}
-                  </p>
-                  <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={currentPage <= 1}
-                      onClick={() => setPage(String(currentPage - 1))}
-                    >
-                      Previous
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={currentPage >= totalPages}
-                      onClick={() => setPage(String(currentPage + 1))}
-                    >
-                      Next
-                    </Button>
-                  </div>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ))}
                 </div>
-              )}
+              ) : packageDetails ? (
+                <div className="text-center py-16 text-sm text-muted-foreground">
+                  <Package className="size-8 mx-auto mb-3 opacity-30" />
+                  No hosts found matching the current filters.
+                </div>
+              ) : null}
             </>
-          ) : report ? (
+          ) : (
             <div className="text-center py-16 text-sm text-muted-foreground">
               <Package className="size-8 mx-auto mb-3 opacity-30" />
-              No packages match your filters.
+              Start typing a package name above to search and select a package.
             </div>
-          ) : null}
+          )}
         </div>
       )}
 

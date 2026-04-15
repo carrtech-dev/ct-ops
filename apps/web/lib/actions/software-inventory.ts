@@ -485,6 +485,123 @@ export async function getPackageDrift(orgId: string): Promise<DriftRow[]> {
     .slice(0, 100)
 }
 
+// ── Package details (single package, all hosts) ────────────────────────────────
+
+export interface PackageHostInfo {
+  hostId: string
+  hostname: string
+  displayName: string | null
+  os: string | null
+  osVersion: string | null
+  source: string
+  architecture: string | null
+  version: string
+  lastSeenAt: Date
+}
+
+export interface PackageVersionGroup {
+  version: string
+  hosts: PackageHostInfo[]
+}
+
+export interface PackageDetailsResult {
+  packageName: string
+  totalHosts: number
+  versionGroups: PackageVersionGroup[]
+}
+
+export async function getPackageDetails(
+  orgId: string,
+  packageName: string,
+  osFamily?: string,
+): Promise<PackageDetailsResult> {
+  const packages = await db
+    .select({
+      hostId: softwarePackages.hostId,
+      version: softwarePackages.version,
+      source: softwarePackages.source,
+      architecture: softwarePackages.architecture,
+      lastSeenAt: softwarePackages.lastSeenAt,
+      hostname: hosts.hostname,
+      displayName: hosts.displayName,
+      os: hosts.os,
+      osVersion: hosts.osVersion,
+    })
+    .from(softwarePackages)
+    .innerJoin(hosts, and(eq(hosts.id, softwarePackages.hostId), isNull(hosts.deletedAt)))
+    .where(
+      and(
+        eq(softwarePackages.organisationId, orgId),
+        eq(softwarePackages.name, packageName),
+        isNull(softwarePackages.removedAt),
+        isNull(softwarePackages.deletedAt),
+      ),
+    )
+    .orderBy(softwarePackages.version, hosts.hostname)
+
+  let filtered = packages
+  if (osFamily) {
+    filtered = filtered.filter((p) =>
+      p.os?.toLowerCase().includes(osFamily.toLowerCase()),
+    )
+  }
+
+  const versionMap = new Map<string, PackageHostInfo[]>()
+  const hostIds = new Set<string>()
+
+  for (const pkg of filtered) {
+    hostIds.add(pkg.hostId)
+    const info: PackageHostInfo = {
+      hostId: pkg.hostId,
+      hostname: pkg.hostname,
+      displayName: pkg.displayName,
+      os: pkg.os,
+      osVersion: pkg.osVersion,
+      source: pkg.source,
+      architecture: pkg.architecture,
+      version: pkg.version,
+      lastSeenAt: pkg.lastSeenAt,
+    }
+    const existing = versionMap.get(pkg.version)
+    if (existing) {
+      existing.push(info)
+    } else {
+      versionMap.set(pkg.version, [info])
+    }
+  }
+
+  const versionGroups: PackageVersionGroup[] = [...versionMap.entries()]
+    .map(([version, hostList]) => ({ version, hosts: hostList }))
+    .sort((a, b) => compareVersions(b.version, a.version))
+
+  return {
+    packageName,
+    totalHosts: hostIds.size,
+    versionGroups,
+  }
+}
+
+export async function getPackageVersions(
+  orgId: string,
+  packageName: string,
+): Promise<string[]> {
+  const rows = await db
+    .select({ version: softwarePackages.version })
+    .from(softwarePackages)
+    .where(
+      and(
+        eq(softwarePackages.organisationId, orgId),
+        eq(softwarePackages.name, packageName),
+        isNull(softwarePackages.removedAt),
+        isNull(softwarePackages.deletedAt),
+      ),
+    )
+    .groupBy(softwarePackages.version)
+    .orderBy(softwarePackages.version)
+
+  return rows.map((r) => r.version).sort((a, b) => compareVersions(b, a))
+}
+
 // ── Compare two hosts ─────────────────────────────────────────────────────────
 
 export interface HostCompareResult {
