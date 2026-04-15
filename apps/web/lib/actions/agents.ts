@@ -701,7 +701,16 @@ export async function deleteHost(
           eq(resourceTags.organisationId, orgId),
         ))
 
-      // 13a. Task run host rows (FK to hosts; must be removed before the host
+      // 13a. Software packages + scans must be removed BEFORE task_run_hosts
+      //      because software_scans.task_run_host_id references task_run_hosts.id.
+      await tx
+        .delete(softwarePackages)
+        .where(and(eq(softwarePackages.hostId, hostId), eq(softwarePackages.organisationId, orgId)))
+      await tx
+        .delete(softwareScans)
+        .where(and(eq(softwareScans.hostId, hostId), eq(softwareScans.organisationId, orgId)))
+
+      // 13b. Task run host rows (FK to hosts; must be removed before the host
       //      is deleted or the transaction fails). Group-targeted task_runs
       //      keep their rows for other hosts; host-targeted task_runs are
       //      then removed as orphans below since they have no remaining rows.
@@ -723,14 +732,6 @@ export async function deleteHost(
       await tx
         .delete(terminalSessions)
         .where(and(eq(terminalSessions.hostId, hostId), eq(terminalSessions.organisationId, orgId)))
-
-      // 14b. Software scans + packages (FK to hosts)
-      await tx
-        .delete(softwarePackages)
-        .where(and(eq(softwarePackages.hostId, hostId), eq(softwarePackages.organisationId, orgId)))
-      await tx
-        .delete(softwareScans)
-        .where(and(eq(softwareScans.hostId, hostId), eq(softwareScans.organisationId, orgId)))
 
       // 14c. Host group memberships (FK to hosts)
       await tx
