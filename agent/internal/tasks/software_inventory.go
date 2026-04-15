@@ -73,9 +73,11 @@ func RunSoftwareInventory(ctx context.Context, _ string, progressFn func(chunk s
 
 	packages, source, err := collectPackages(ctx)
 	if err != nil {
-		slog.Warn("software_inventory: collectPackages", "err", err)
-		// Return a partial result rather than failing entirely when no
-		// package manager is found — the task still completes with 0 packages.
+		slog.Warn("software_inventory: collectPackages failed", "err", err)
+		// Fail the task rather than submitting 0 packages. Submitting 0 packages
+		// would trigger MarkRemovedPackages on the server, wiping all previously
+		// known packages for this host even though the scan failed.
+		return &agentv1.AgentTaskResult{ExitCode: -1, Error: fmt.Sprintf("collecting packages: %v", err)}
 	}
 
 	progressFn(fmt.Sprintf("collected %d packages (source: %s), streaming to server…\n", len(packages), source))

@@ -35,7 +35,7 @@ const filterSchema = z.object({
   vp: z.string().max(100).optional(),
   vl: z.string().max(100).optional(),
   vh: z.string().max(100).optional(),
-  src: z.string().max(50).optional(),
+  of: z.string().max(20).optional(),
   hostId: z.string().max(50).optional(), // single-host CSV from the inventory tab
 })
 
@@ -88,7 +88,7 @@ export async function GET(req: NextRequest) {
     vp: sp.get('vp'),
     vl: sp.get('vl'),
     vh: sp.get('vh'),
-    src: sp.get('src'),
+    of: sp.get('of'),
     hostId: sp.get('hostId'),
   }
 
@@ -97,7 +97,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid parameters' }, { status: 400 })
   }
 
-  const { format, name, vm, ve, vp, vl, vh, src, hostId } = parsed.data
+  const { format, name, vm, ve, vp, vl, vh, of: osFamily, hostId } = parsed.data
 
   const filters: SoftwareReportFilters = {
     name: name || undefined,
@@ -106,7 +106,7 @@ export async function GET(req: NextRequest) {
     versionPrefix: vp || undefined,
     versionLow: vl || undefined,
     versionHigh: vh || undefined,
-    source: src || undefined,
+    osFamily: osFamily || undefined,
     page: 1,
     pageSize: 250_000, // hard cap enforced below
   }
