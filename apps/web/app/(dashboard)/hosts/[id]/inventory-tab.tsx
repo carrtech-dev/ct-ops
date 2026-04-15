@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import Link from 'next/link'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { formatDistanceToNow, format } from 'date-fns'
-import { AlertTriangle, Download, GitCompare, RefreshCw, Search, Eye, EyeOff, Loader2, Package } from 'lucide-react'
+import { AlertTriangle, Download, GitCompare, RefreshCw, Search, Eye, EyeOff, Loader2, Package, XCircle } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -225,6 +225,21 @@ export function InventoryTab({ hostId, orgId }: Props) {
           <Loader2 className="size-4 animate-spin" />
           <AlertDescription>
             Scan in progress — collecting packages…
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {/* Last failed scan */}
+      {!data?.activeScan && data?.lastFailedScan && (
+        <Alert variant="destructive">
+          <XCircle className="size-4" />
+          <AlertDescription>
+            <p className="font-medium">Last scan failed.</p>
+            {data.lastFailedScan.output && (
+              <pre className="mt-2 text-xs whitespace-pre-wrap font-mono bg-destructive/10 rounded p-2 max-h-40 overflow-y-auto">
+                {data.lastFailedScan.output.trim()}
+              </pre>
+            )}
           </AlertDescription>
         </Alert>
       )}

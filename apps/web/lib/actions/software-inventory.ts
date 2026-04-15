@@ -140,6 +140,7 @@ export interface HostSoftwareInventory {
   lastScan: SoftwareScan | null
   settings: SoftwareInventorySettings
   activeScan: 'pending' | 'running' | null
+  lastFailedScan: { output: string; completedAt: Date | null } | null
 }
 
 export async function getHostSoftwareInventory(
@@ -147,7 +148,7 @@ export async function getHostSoftwareInventory(
   hostId: string,
   includeRemoved = false,
 ): Promise<HostSoftwareInventory> {
-  const [packages, scans, settings, activeTaskRows] = await Promise.all([
+  const [packages, scans, settings, activeTaskRows, failedTaskRows] = await Promise.all([
     db.query.softwarePackages.findMany({
       where: and(
         eq(softwarePackages.organisationId, orgId),
@@ -186,6 +187,28 @@ export async function getHostSoftwareInventory(
         ),
       )
       .limit(1),
+    // Most recent failed software_inventory task for this host
+    db
+      .select({ rawOutput: taskRunHosts.rawOutput, completedAt: taskRunHosts.completedAt })
+      .from(taskRunHosts)
+      .innerJoin(
+        taskRuns,
+        and(
+          eq(taskRuns.id, taskRunHosts.taskRunId),
+          eq(taskRuns.taskType, 'software_inventory'),
+          isNull(taskRuns.deletedAt),
+        ),
+      )
+      .where(
+        and(
+          eq(taskRunHosts.hostId, hostId),
+          eq(taskRunHosts.organisationId, orgId),
+          eq(taskRunHosts.status, 'failed'),
+          isNull(taskRunHosts.deletedAt),
+        ),
+      )
+      .orderBy(desc(taskRunHosts.updatedAt))
+      .limit(1),
   ])
 
   const activeRow = activeTaskRows[0]
@@ -193,7 +216,12 @@ export async function getHostSoftwareInventory(
     ? (activeRow.status as 'pending' | 'running')
     : null
 
-  return { packages, lastScan: scans[0] ?? null, settings, activeScan }
+  const failedRow = failedTaskRows[0]
+  const lastFailedScan = failedRow
+    ? { output: failedRow.rawOutput, completedAt: failedRow.completedAt }
+    : null
+
+  return { packages, lastScan: scans[0] ?? null, settings, activeScan, lastFailedScan }
 }
 
 // ── Global report search ──────────────────────────────────────────────────────
