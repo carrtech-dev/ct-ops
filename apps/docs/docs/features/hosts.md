@@ -1,7 +1,3 @@
----
-sidebar_position: 1
----
-
 # Hosts & Inventory
 
 The Hosts page is the primary inventory view in Infrawatch. It shows every server that has registered an agent, along with real-time status, recent vitals, and quick access to all host-level tooling.

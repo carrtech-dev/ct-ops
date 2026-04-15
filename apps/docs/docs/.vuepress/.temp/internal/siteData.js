@@ -1,0 +1,1 @@
+export const siteData = JSON.parse("{\"base\":\"/infrawatch/\",\"lang\":\"en-US\",\"title\":\"Infrawatch\",\"description\":\"Open-source infrastructure monitoring for engineering teams\",\"head\":[],\"locales\":{\"/\":{\"lang\":\"en-US\",\"title\":\"Infrawatch\",\"description\":\"Open-source infrastructure monitoring for engineering teams\"}}}")

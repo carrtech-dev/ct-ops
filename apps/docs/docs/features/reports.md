@@ -1,7 +1,3 @@
----
-sidebar_position: 7
----
-
 # Reports
 
 The Reports section provides fleet-wide views that aggregate data across all hosts. Currently the primary report is the **Software Inventory** report.

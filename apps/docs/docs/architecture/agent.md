@@ -1,7 +1,3 @@
----
-sidebar_position: 2
----
-
 # Agent Architecture
 
 The Infrawatch agent is a statically compiled Go binary. It has no runtime dependencies — just copy the binary to a host and run it. It is designed to work in fully air-gapped environments.
