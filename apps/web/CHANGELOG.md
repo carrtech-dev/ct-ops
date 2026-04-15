@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.34.6](https://github.com/simonjcarr/infrawatch/compare/web/v0.34.5...web/v0.34.6) (2026-04-15)
+
+
+### Bug Fixes
+
+* **agents:** delete software_scans before task_run_hosts in deleteHost ([1b95ee4](https://github.com/simonjcarr/infrawatch/commit/1b95ee405a691575c6b1845e59f09d2a8afe7ed5))
+* **agents:** delete software_scans before task_run_hosts in deleteHost cascade ([f6c9217](https://github.com/simonjcarr/infrawatch/commit/f6c9217c46e9f5aa4bf0dcb6592577666681bdeb))
+
 ## [0.34.5](https://github.com/simonjcarr/infrawatch/compare/web/v0.34.4...web/v0.34.5) (2026-04-15)
 
 
