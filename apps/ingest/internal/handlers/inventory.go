@@ -232,9 +232,12 @@ func (h *InventoryHandler) authenticateStream(stream agentv1.IngestService_Submi
 	if len(token) > 7 && strings.EqualFold(token[:7], "bearer ") {
 		token = token[7:]
 	}
-	agentID, _, err := h.issuer.ValidateAgentToken(token)
+	// Accept expired tokens (same as terminal/heartbeat handlers) — the agent
+	// may have a token that hasn't been refreshed yet but is otherwise valid.
+	// The RSA signature is still verified; only the expiry check is relaxed.
+	agentID, _, err := h.issuer.ValidateAgentTokenAllowExpired(token)
 	if err != nil {
-		return "", status.Error(codes.Unauthenticated, "invalid or expired token")
+		return "", status.Error(codes.Unauthenticated, "invalid token")
 	}
 	return agentID, nil
 }
