@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.24.1](https://github.com/simonjcarr/infrawatch/compare/agent/v0.24.0...agent/v0.24.1) (2026-04-15)
+
+
+### Bug Fixes
+
+* **inventory:** add per-collector logging and ingest scan diagnostics ([21beda1](https://github.com/simonjcarr/infrawatch/commit/21beda18daf3e0ec990630312e55a2c2dcb6eae5))
+* **inventory:** add per-collector logging and ingest scan-start diagnostics ([4598052](https://github.com/simonjcarr/infrawatch/commit/4598052003d519596442bd27760f2c8499292622))
+
 ## [0.24.0](https://github.com/simonjcarr/infrawatch/compare/agent/v0.23.2...agent/v0.24.0) (2026-04-15)
 
 
