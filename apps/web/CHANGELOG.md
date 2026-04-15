@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.34.2](https://github.com/simonjcarr/infrawatch/compare/web/v0.34.1...web/v0.34.2) (2026-04-15)
+
+
+### Bug Fixes
+
+* **inventory:** surface failed scan errors in host inventory tab ([cb94381](https://github.com/simonjcarr/infrawatch/commit/cb94381c37a90a9971c87a574baac8a4abe72596))
+* **inventory:** surface failed scan errors in host inventory tab ([26b9095](https://github.com/simonjcarr/infrawatch/commit/26b90956413f93ebd22d4a472419115cc9caa7a9))
+
 ## [0.34.1](https://github.com/simonjcarr/infrawatch/compare/web/v0.34.0...web/v0.34.1) (2026-04-15)
 
 
