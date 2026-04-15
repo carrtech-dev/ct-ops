@@ -6,24 +6,9 @@ Infrawatch is a monorepo composed of several independently deployable services. 
 
 ## System Diagram
 
-```
-┌─────────────────────────────────────┐
-│           Your Servers              │
-│                                     │
-│  [Agent A]  [Agent B]  [Agent N]    │
-└──────┬──────────┬───────────┬───────┘
-       │ gRPC+mTLS│           │
-       ▼          ▼           ▼
-┌──────────────────────────────────────────────────────────┐
-│                  Infrawatch Stack                        │
-│                                                          │
-│  [Ingest Service :9443]  ──────►  [Queue]               │
-│         │                         │  │  │               │
-│         │ (WebSocket)           [Metrics][Alerts][Events]│
-│         │                         │  │  │               │
-│  [Next.js Web App :3000] ◄──────  [PostgreSQL+TimescaleDB│
-└──────────────────────────────────────────────────────────┘
-```
+
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/c242cb2d-acf6-491e-9ef0-eaafe839a3d3" />
+
 
 ---
 
