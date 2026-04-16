@@ -19,6 +19,7 @@ import {
 } from './components/network-flow-nodes'
 import { AnimatedFlowEdge } from './components/animated-flow-edge'
 import { HostNodeContextMenu } from './components/host-node-context-menu'
+import { HostNodeTerminalDialog } from './components/host-node-terminal-dialog'
 import type { Network as NetworkType, Host } from '@/lib/db/schema'
 
 export type NetworkWithHosts = NetworkType & { hosts: Host[] }
@@ -130,6 +131,8 @@ export function AllNetworksGraph({ networksWithHosts }: Props) {
   )
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
+  const [terminalTarget, setTerminalTarget] = useState<HostNodeData | null>(null)
+  const [terminalDialogOpen, setTerminalDialogOpen] = useState(false)
 
   const graphKey = networksWithHosts
     .map((n) => `${n.id}:${n.hosts.map((h) => h.id).join(',')}`)
@@ -176,8 +179,21 @@ export function AllNetworksGraph({ networksWithHosts }: Props) {
           y={contextMenu.y}
           data={contextMenu.data}
           onClose={closeContextMenu}
+          onOpenTerminal={(data) => {
+            setTerminalTarget(data)
+            setTerminalDialogOpen(true)
+          }}
         />
       )}
+
+      <HostNodeTerminalDialog
+        data={terminalTarget}
+        open={terminalDialogOpen}
+        onOpenChange={(open) => {
+          setTerminalDialogOpen(open)
+          if (!open) setTerminalTarget(null)
+        }}
+      />
     </div>
   )
 }
