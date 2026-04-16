@@ -6,12 +6,7 @@ The ingest service is a stateless gRPC server that sits between the agents and t
 
 ## Architecture
 
-```
-Agent ──gRPC+TLS──► Ingest Service ──pgx──► PostgreSQL
-                         │
-                         └──HTTP──► /.well-known/jwks.json
-                                    /healthz
-```
+<img alt="image" src="https://github.com/user-attachments/assets/3efe12f2-417e-4579-b81b-16293e90c2e7" />
 
 ---
 
