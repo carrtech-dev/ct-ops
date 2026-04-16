@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { Terminal } from 'lucide-react'
 import { useTerminalPanel } from '@/components/terminal'
 import {
@@ -21,22 +21,24 @@ interface Props {
   onOpenChange: (open: boolean) => void
 }
 
-export function HostNodeTerminalDialog({ data, open, onOpenChange }: Props) {
+// Inner form — keyed by hostId so it remounts (and re-initialises username) on each new host
+function TerminalConnectForm({
+  data,
+  onOpenChange,
+}: {
+  data: HostNodeData
+  onOpenChange: (open: boolean) => void
+}) {
   const { openTerminal } = useTerminalPanel()
-  const [username, setUsername] = useState('')
-
-  // Load saved username whenever the target host changes
-  useEffect(() => {
-    if (!data) return
+  const [username, setUsername] = useState(() => {
     try {
-      setUsername(localStorage.getItem(`terminal-username:${data.hostId}`) ?? '')
+      return localStorage.getItem(`terminal-username:${data.hostId}`) ?? ''
     } catch {
-      setUsername('')
+      return ''
     }
-  }, [data])
+  })
 
   const handleConnect = useCallback(() => {
-    if (!data) return
     try {
       if (username.trim()) {
         localStorage.setItem(`terminal-username:${data.hostId}`, username.trim())
@@ -54,36 +56,44 @@ export function HostNodeTerminalDialog({ data, open, onOpenChange }: Props) {
     onOpenChange(false)
   }, [data, username, openTerminal, onOpenChange])
 
-  if (!data) return null
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>Connect to {data.name}</DialogTitle>
+      </DialogHeader>
+      <div className="space-y-2">
+        <Label htmlFor="host-graph-username">Username</Label>
+        <Input
+          id="host-graph-username"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          placeholder="e.g. jsmith"
+          autoFocus
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && username.trim()) handleConnect()
+          }}
+        />
+      </div>
+      <DialogFooter>
+        <Button variant="outline" onClick={() => onOpenChange(false)}>
+          Cancel
+        </Button>
+        <Button onClick={handleConnect} disabled={!username.trim()}>
+          <Terminal className="size-4 mr-1.5" />
+          Connect
+        </Button>
+      </DialogFooter>
+    </>
+  )
+}
 
+export function HostNodeTerminalDialog({ data, open, onOpenChange }: Props) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-xs">
-        <DialogHeader>
-          <DialogTitle>Connect to {data.name}</DialogTitle>
-        </DialogHeader>
-        <div className="space-y-2">
-          <Label htmlFor="host-graph-username">Username</Label>
-          <Input
-            id="host-graph-username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="e.g. jsmith"
-            autoFocus
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && username.trim()) handleConnect()
-            }}
-          />
-        </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
-          </Button>
-          <Button onClick={handleConnect} disabled={!username.trim()}>
-            <Terminal className="size-4 mr-1.5" />
-            Connect
-          </Button>
-        </DialogFooter>
+        {data && (
+          <TerminalConnectForm key={data.hostId} data={data} onOpenChange={onOpenChange} />
+        )}
       </DialogContent>
     </Dialog>
   )
