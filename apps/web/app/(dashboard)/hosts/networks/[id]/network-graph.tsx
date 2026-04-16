@@ -15,11 +15,16 @@ import {
   NetworkNodeComponent,
   HostNodeComponent,
 } from '../components/network-flow-nodes'
+import { AnimatedFlowEdge } from '../components/animated-flow-edge'
 import type { Network as NetworkType, Host } from '@/lib/db/schema'
 
 const nodeTypes = {
   networkNode: NetworkNodeComponent,
   hostNode: HostNodeComponent,
+}
+
+const edgeTypes = {
+  animatedFlow: AnimatedFlowEdge,
 }
 
 const NETWORK_W = 220
@@ -85,8 +90,8 @@ function computeLayout(
       id: `e-${host.id}`,
       source: 'network',
       target: `host-${host.id}`,
-      type: 'smoothstep',
-      style: { stroke: 'hsl(var(--border))', strokeWidth: 1.5 },
+      type: 'animatedFlow',
+      data: { hostStatus: host.status ?? 'unknown' },
     })
   })
 
@@ -111,6 +116,7 @@ export function NetworkGraph({ network, hosts }: Props) {
         defaultNodes={nodes}
         defaultEdges={edges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         nodesDraggable={false}
         nodesConnectable={false}
         elementsSelectable={false}
