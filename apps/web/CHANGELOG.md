@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.39.0](https://github.com/simonjcarr/infrawatch/compare/web/v0.38.0...web/v0.39.0) (2026-04-16)
+
+
+### Features
+
+* add animated flowing dots to network graph edges ([08c5f22](https://github.com/simonjcarr/infrawatch/commit/08c5f227f49f14735992ded0034d90a7db49e7a4))
+* animated flowing dots on network graph edges ([bc0edf5](https://github.com/simonjcarr/infrawatch/commit/bc0edf5c105cb9bdfdda4a25f556ceaca2a95b68))
+
+
+### Bug Fixes
+
+* make React Flow controls and minimap respect dark mode ([ac27713](https://github.com/simonjcarr/infrawatch/commit/ac27713ce8fcc10ef4db3aaac58b9f68d85b0fad))
+
 ## [0.38.0](https://github.com/simonjcarr/infrawatch/compare/web/v0.37.0...web/v0.38.0) (2026-04-16)
 
 
