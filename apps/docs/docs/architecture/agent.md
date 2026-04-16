@@ -6,23 +6,8 @@ The Infrawatch agent is a statically compiled Go binary. It has no runtime depen
 
 ## Overview
 
-```
-Agent                    Ingest Service          PostgreSQL
-  │                            │                     │
-  │── Register(token, key) ───►│                     │
-  │                            │── insert host ─────►│
-  │◄── agent_id, pending ──────│                     │
-  │                            │                     │
-  │  (polls every 30s)         │                     │
-  │── GetStatus(agent_id) ────►│                     │
-  │◄── status=active, jwt ─────│                     │
-  │                            │                     │
-  │  save agent_state.json     │                     │
-  │                            │                     │
-  │══ Heartbeat stream ════════►│                     │
-  │   cpu/mem/disk/uptime      │── update vitals ───►│
-  │◄══════════════════════════ │                     │
-```
+<img alt="image" src="https://github.com/user-attachments/assets/e7811f23-c2fd-4efa-93da-a64cc44a63aa" />
+
 
 ---
 
