@@ -63,23 +63,7 @@ The web app never talks directly to the ingest service in the request path — i
 
 ## Data Flow
 
-### Agent registration
-
-```
-Agent → Register RPC → Ingest → Validates token → Inserts host record
-                                                 → Issues JWT
-                                                 → Returns agent_id + status
-Agent ← JWT ← Ingest
-Agent → Heartbeat stream → Ingest → Writes vitals to DB → Queue → TimescaleDB
-```
-
-### Alert evaluation
-
-```
-Ingest → Queue (metrics.raw) → Alerts Consumer → Evaluates rules → Inserts alert instances
-                                                                  → Inserts notifications
-Web App → Reads notifications → Displays in notification bell
-```
+<img alt="image" src="https://github.com/user-attachments/assets/dc40e2c5-cda1-49e1-9188-88bb3cc3d8cf" />
 
 ---
 
