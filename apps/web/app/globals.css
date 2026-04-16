@@ -128,3 +128,50 @@
     @apply font-sans;
   }
 }
+
+/* ── React Flow dark mode overrides ─────────────────────────────────────────── */
+/* The React Flow library ships with hardcoded light-mode whites.
+   These overrides make the Controls and MiniMap respect the app's dark theme. */
+
+.dark .react-flow {
+  background-color: var(--background);
+}
+
+.dark .react-flow__controls {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  box-shadow: none;
+}
+
+.dark .react-flow__controls-button {
+  background-color: var(--card);
+  border-bottom-color: var(--border);
+  color: var(--card-foreground);
+  fill: var(--card-foreground);
+}
+
+.dark .react-flow__controls-button:hover {
+  background-color: var(--muted);
+}
+
+.dark .react-flow__controls-button svg {
+  fill: var(--card-foreground);
+}
+
+.dark .react-flow__minimap {
+  background-color: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.dark .react-flow__minimap-mask {
+  fill: var(--background);
+  opacity: 0.75;
+}
+
+.dark .react-flow__minimap-node {
+  fill: var(--muted);
+  stroke: var(--border);
+}
