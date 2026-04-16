@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.41.1](https://github.com/simonjcarr/infrawatch/compare/web/v0.41.0...web/v0.41.1) (2026-04-16)
+
+
+### Bug Fixes
+
+* switch network graph context menu to onNodeContextMenu approach ([3f3946d](https://github.com/simonjcarr/infrawatch/commit/3f3946d7f8209f1e3293919f93617279790db2f6))
+* switch network graph context menu to React Flow onNodeContextMenu ([be8392f](https://github.com/simonjcarr/infrawatch/commit/be8392f2bf58bc414bad2c0c18cfb5dfcee5c0c1))
+
 ## [0.41.0](https://github.com/simonjcarr/infrawatch/compare/web/v0.40.0...web/v0.41.0) (2026-04-16)
 
 
