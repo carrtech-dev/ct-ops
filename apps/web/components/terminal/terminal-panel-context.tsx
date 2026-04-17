@@ -294,13 +294,23 @@ const DEFAULT_STATE: TerminalPanelState = {
 // --- Provider ---
 
 export function TerminalPanelProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<TerminalPanelState>(
-    () => loadPersistedState() ?? DEFAULT_STATE,
-  )
+  // Always start with DEFAULT_STATE so the server-rendered HTML matches the
+  // client's first render. Persisted state is loaded in a post-mount effect —
+  // reading sessionStorage during useState init would cause a hydration
+  // mismatch (React error #418) and break interactivity for the whole tree.
+  const [state, setState] = useState<TerminalPanelState>(DEFAULT_STATE)
+  const [hasHydrated, setHasHydrated] = useState(false)
 
   useEffect(() => {
+    const persisted = loadPersistedState()
+    if (persisted) setState(persisted)
+    setHasHydrated(true)
+  }, [])
+
+  useEffect(() => {
+    if (!hasHydrated) return
     persistState(state)
-  }, [state])
+  }, [state, hasHydrated])
 
   const openTerminal = useCallback(
     (params: {
