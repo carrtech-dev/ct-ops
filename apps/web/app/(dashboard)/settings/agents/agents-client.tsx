@@ -78,8 +78,12 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
+function getAppOrigin(): string {
+  return process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, '') ?? window.location.origin
+}
+
 function buildInstallCommand(token: string, skipVerify: boolean): string {
-  const installUrl = new URL(`${window.location.origin}/api/agent/install`)
+  const installUrl = new URL(`${getAppOrigin()}/api/agent/install`)
   installUrl.searchParams.set('token', token)
   if (skipVerify) {
     installUrl.searchParams.set('skip_verify', 'true')
@@ -147,7 +151,7 @@ export function AgentsSettingsClient({
       if ('error' in result) return
       queryClient.invalidateQueries({ queryKey: ['enrolment-tokens', orgId] })
       setNewTokenValue(result.token)
-      const installUrl = new URL(`${window.location.origin}/api/agent/install`)
+      const installUrl = new URL(`${getAppOrigin()}/api/agent/install`)
       installUrl.searchParams.set('token', result.token)
       if (variables.skipVerify) {
         installUrl.searchParams.set('skip_verify', 'true')
