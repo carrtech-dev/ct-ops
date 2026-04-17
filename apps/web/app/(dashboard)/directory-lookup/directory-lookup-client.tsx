@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Search,
   Loader2,
@@ -63,9 +64,35 @@ export function DirectoryLookupClient({
   const [showAllAttrs, setShowAllAttrs] = useState(false)
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const suggestionsRef = useRef<HTMLDivElement>(null)
+  const anchorRef = useRef<HTMLDivElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
   const configIdRef = useRef(configId)
   useEffect(() => { configIdRef.current = configId }, [configId])
+
+  const [dropdownPos, setDropdownPos] = useState<{ top: number; left: number; width: number } | null>(null)
+  // Flip once after mount so the portal only renders on the client (document.body is not available during SSR).
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- one-shot flag to detect client render; required because 'use client' components still run on the server.
+    setMounted(true)
+  }, [])
+
+  useEffect(() => {
+    if (!showSuggestions) return
+    function update() {
+      const el = anchorRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      setDropdownPos({ top: rect.bottom + 4, left: rect.left, width: rect.width })
+    }
+    update()
+    window.addEventListener('resize', update)
+    window.addEventListener('scroll', update, true)
+    return () => {
+      window.removeEventListener('resize', update)
+      window.removeEventListener('scroll', update, true)
+    }
+  }, [showSuggestions, suggestions.length])
 
   // Reset state on config change
   function handleConfigChange(newConfigId: string) {
@@ -146,7 +173,10 @@ export function DirectoryLookupClient({
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (suggestionsRef.current && !suggestionsRef.current.contains(e.target as Node)) {
+      const target = e.target as Node
+      const insideAnchor = anchorRef.current?.contains(target)
+      const insideDropdown = dropdownRef.current?.contains(target)
+      if (!insideAnchor && !insideDropdown) {
         setShowSuggestions(false)
       }
     }
@@ -202,41 +232,44 @@ export function DirectoryLookupClient({
 
           <div className="space-y-1.5">
             <Label htmlFor="lookup-username">Username</Label>
-            <div className="relative" ref={suggestionsRef}>
-              <div className="relative">
-                <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-                <Input
-                  id="lookup-username"
-                  value={query}
-                  onChange={(e) => handleQueryInput(e.target.value)}
-                  onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true) }}
-                  placeholder="Start typing a username..."
-                  autoComplete="off"
-                  className="pl-9"
-                />
-                {(searching || loadingDetail) && (
-                  <Loader2 className="absolute right-2.5 top-2.5 size-4 animate-spin text-muted-foreground" />
-                )}
-              </div>
-
-              {showSuggestions && (
-                <div className="absolute z-50 mt-1 w-full rounded-md border bg-popover shadow-md">
-                  {suggestions.map((user) => (
-                    <button
-                      key={user.dn}
-                      type="button"
-                      className="w-full text-left px-3 py-2 hover:bg-accent transition-colors first:rounded-t-md last:rounded-b-md"
-                      onClick={() => selectUser(user)}
-                    >
-                      <p className="font-medium font-mono text-sm">{user.username}</p>
-                      {user.displayName && (
-                        <p className="text-xs text-muted-foreground">{user.displayName}</p>
-                      )}
-                    </button>
-                  ))}
-                </div>
+            <div className="relative" ref={anchorRef}>
+              <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+              <Input
+                id="lookup-username"
+                value={query}
+                onChange={(e) => handleQueryInput(e.target.value)}
+                onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true) }}
+                placeholder="Start typing a username..."
+                autoComplete="off"
+                className="pl-9"
+              />
+              {(searching || loadingDetail) && (
+                <Loader2 className="absolute right-2.5 top-2.5 size-4 animate-spin text-muted-foreground" />
               )}
             </div>
+
+            {mounted && showSuggestions && dropdownPos && createPortal(
+              <div
+                ref={dropdownRef}
+                className="fixed z-50 rounded-md border bg-popover shadow-md"
+                style={{ top: dropdownPos.top, left: dropdownPos.left, width: dropdownPos.width }}
+              >
+                {suggestions.map((user) => (
+                  <button
+                    key={user.dn}
+                    type="button"
+                    className="w-full text-left px-3 py-2 hover:bg-accent transition-colors first:rounded-t-md last:rounded-b-md"
+                    onClick={() => selectUser(user)}
+                  >
+                    <p className="font-medium font-mono text-sm">{user.username}</p>
+                    {user.displayName && (
+                      <p className="text-xs text-muted-foreground">{user.displayName}</p>
+                    )}
+                  </button>
+                ))}
+              </div>,
+              document.body,
+            )}
           </div>
 
           {error && (
