@@ -62,12 +62,13 @@ func (c *Config) Validate() error {
 }
 
 // GenerateRunID returns a compact deterministic-looking identifier of the form
-// "lt-YYMMDD-HHMMSS-XXXX" where the last four characters are random hex, so
-// concurrent load-test runs from the same wall-clock second still have
-// distinct IDs.
+// "lt-YYMMDD-HHMMSS-XXXXXXXX" where the last eight characters are random hex,
+// so concurrent load-test runs from the same wall-clock second still have
+// distinct IDs. 4 random bytes (32 bits) gives ~2^-32 collision probability
+// per pair, comfortably avoiding birthday-paradox flakes in tight loops.
 func GenerateRunID() string {
 	now := time.Now().UTC()
-	var b [2]byte
+	var b [4]byte
 	_, _ = rand.Read(b[:])
 	return fmt.Sprintf("lt-%s-%s", now.Format("060102-150405"), hex.EncodeToString(b[:]))
 }
