@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.55.1](https://github.com/carrtech-dev/ct-ops/compare/web/v0.55.0...web/v0.55.1) (2026-04-18)
+
+
+### Bug Fixes
+
+* **security:** add auth/org check to deleteCertificate ([#281](https://github.com/carrtech-dev/ct-ops/issues/281)) ([48bbbd1](https://github.com/carrtech-dev/ct-ops/commit/48bbbd1dddead1248efa31baaae2fabcdf21cd1b))
+* **security:** add auth/org check to deleteCertificate (C-09) ([60a8a16](https://github.com/carrtech-dev/ct-ops/commit/60a8a161d0bb22971534f13a811ce263349ea03c))
+
 ## [0.55.0](https://github.com/carrtech-dev/ct-ops/compare/web/v0.54.1...web/v0.55.0) (2026-04-18)
 
 
