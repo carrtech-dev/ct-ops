@@ -2,7 +2,7 @@
 
 This bundle contains everything you need to run Infrawatch on a single host
 using Docker. The container images are pulled from GitHub Container Registry
-(`ghcr.io/simonjcarr/infrawatch/*`) the first time you start the stack.
+(`ghcr.io/carrtech-dev/infrawatch/*`) the first time you start the stack.
 
 ## Prerequisites
 

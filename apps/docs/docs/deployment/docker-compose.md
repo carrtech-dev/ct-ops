@@ -95,8 +95,8 @@ The web container runs database migrations automatically on first start. Once yo
 | Service | Image | Port(s) | Description |
 |---|---|---|---|
 | `db` | `timescale/timescaledb:latest-pg16` | 5432 | PostgreSQL + TimescaleDB |
-| `web` | `ghcr.io/simonjcarr/infrawatch/web:latest` | 3000 | Next.js web app |
-| `ingest` | `ghcr.io/simonjcarr/infrawatch/ingest:latest` | 9443, 8080 | gRPC ingest + JWKS |
+| `web` | `ghcr.io/carrtech-dev/infrawatch/web:latest` | 3000 | Next.js web app |
+| `ingest` | `ghcr.io/carrtech-dev/infrawatch/ingest:latest` | 9443, 8080 | gRPC ingest + JWKS |
 
 ---
 
