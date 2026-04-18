@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.49.0](https://github.com/carrtech-dev/ct-ops/compare/web/v0.48.0...web/v0.49.0) (2026-04-18)
+
+
+### Features
+
+* **certificates:** track certificates from the Certificate Checker ([d8dcdfa](https://github.com/carrtech-dev/ct-ops/commit/d8dcdfa8091e7e3fc382b0c4c062f986e0d49d62))
+* **certificates:** track certificates from the Certificate Checker ([e5eaf8a](https://github.com/carrtech-dev/ct-ops/commit/e5eaf8a669a5ff842046204f63afefa1f57b4945))
+
 ## [0.48.0](https://github.com/carrtech-dev/ct-ops/compare/web/v0.47.0...web/v0.48.0) (2026-04-18)
 
 
