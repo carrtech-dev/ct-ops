@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Play, Power, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -107,9 +108,9 @@ export function TagRulesClient({ orgId, initialRules }: TagRulesClientProps) {
           <CardTitle>Saved rules</CardTitle>
           <CardDescription>
             Create rules from the{' '}
-            <a className="underline" href="/hosts/bulk-tag">
+            <Link className="underline" href="/hosts/bulk-tag">
               Bulk Tag
-            </a>{' '}
+            </Link>{' '}
             page.
           </CardDescription>
         </CardHeader>
