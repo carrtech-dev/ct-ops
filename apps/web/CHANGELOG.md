@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.48.0](https://github.com/carrtech-dev/ct-ops/compare/web/v0.47.0...web/v0.48.0) (2026-04-18)
+
+
+### Features
+
+* certificate checker — paste + drag-drop for certs and keys ([1a9f828](https://github.com/carrtech-dev/ct-ops/commit/1a9f8286374613960b12dc48a93f8c27eade0d2e))
+* certificate checker — paste + drag-drop for certs and keys ([f4070ef](https://github.com/carrtech-dev/ct-ops/commit/f4070ef512a5afb528c575c1f797044ff503d217))
+
 ## [0.47.0](https://github.com/carrtech-dev/ct-ops/compare/web/v0.46.0...web/v0.47.0) (2026-04-18)
 
 
