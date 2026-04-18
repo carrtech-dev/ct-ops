@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { formatDistanceToNow } from 'date-fns'
 import {
@@ -220,18 +220,39 @@ export function HostsClient({
   const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE)
 
   // Debounce the search input so typing into the box does not spam the server.
+  // Timer lives in a ref so the setState pair (setSearch + setPage) runs from an
+  // event callback path rather than from inside an effect — the lint rule
+  // `react-hooks/set-state-in-effect` blocks the effect variant.
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setSearch(searchInput.trim())
+    return () => {
+      if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+    }
+  }, [])
+
+  function handleSearchChange(value: string) {
+    setSearchInput(value)
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current)
+    searchTimerRef.current = setTimeout(() => {
+      setSearch(value.trim())
       setPage(0)
     }, 250)
-    return () => clearTimeout(timer)
-  }, [searchInput])
+  }
 
-  // Any filter change resets to the first page.
-  useEffect(() => {
+  // Any filter change resets to the first page — done inline in the handler to
+  // keep the state transition out of an effect.
+  function handleStatusChange(value: StatusFilter) {
+    setStatus(value)
     setPage(0)
-  }, [status, os, pageSize])
+  }
+  function handleOsChange(value: string) {
+    setOs(value)
+    setPage(0)
+  }
+  function handlePageSizeChange(value: number) {
+    setPageSize(value)
+    setPage(0)
+  }
 
   const queryParams = useMemo(
     () => ({
@@ -449,7 +470,7 @@ export function HostsClient({
                       <div className="flex items-center justify-between text-sm">
                         <button
                           type="button"
-                          onClick={() => setOs(row.os === 'Unknown' ? 'all' : row.os)}
+                          onClick={() => handleOsChange(row.os === 'Unknown' ? 'all' : row.os)}
                           className="text-left hover:underline underline-offset-2"
                           title="Filter list by this OS"
                         >
@@ -560,12 +581,12 @@ export function HostsClient({
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 size-4 text-muted-foreground pointer-events-none" />
               <Input
                 value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
+                onChange={(e) => handleSearchChange(e.target.value)}
                 placeholder="Search hostname, display name or IP…"
                 className="pl-9"
               />
             </div>
-            <Select value={status} onValueChange={(v) => setStatus(v as StatusFilter)}>
+            <Select value={status} onValueChange={(v) => handleStatusChange(v as StatusFilter)}>
               <SelectTrigger className="w-40">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
@@ -576,7 +597,7 @@ export function HostsClient({
                 <SelectItem value="unknown">Unknown</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={os} onValueChange={setOs}>
+            <Select value={os} onValueChange={handleOsChange}>
               <SelectTrigger className="w-44">
                 <SelectValue placeholder="OS" />
               </SelectTrigger>
@@ -591,7 +612,7 @@ export function HostsClient({
             </Select>
             <Select
               value={String(pageSize)}
-              onValueChange={(v) => setPageSize(Number(v))}
+              onValueChange={(v) => handlePageSizeChange(Number(v))}
             >
               <SelectTrigger className="w-32">
                 <SelectValue />
