@@ -37,6 +37,15 @@ Each script execution creates a **task run** record. The task runs page shows:
 
 Click a task run to see the full stdout/stderr output.
 
+### Manual vs automated runs on a host
+
+On the host detail page, the **Tools** section splits task history into two tabs:
+
+- **Tasks** — runs you started yourself by clicking **Run Script**, **Run Patch** or **Service**. This is the place to find scripts you previously ran on a host.
+- **Logs** — runs started automatically by Infrawatch on a schedule, such as software inventory scans. These share the same underlying execution mechanism, but are separated out so the Tasks list stays focused on your own activity.
+
+Both tabs link through to the same task monitor view, so the full raw output is available regardless of which tab the run was started from.
+
 ---
 
 ## Runbooks
