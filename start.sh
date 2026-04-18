@@ -26,7 +26,7 @@ cd "$SCRIPT_DIR"
 # Preference order: docker compose > podman compose > podman-compose.
 if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
   COMPOSE=(docker compose)
-elif command -v podman >/dev/null 2>&1 && podman compose version >/dev/null 2>&1; then
+elif command -v podman >/dev/null 2>&1 && podman compose --help >/dev/null 2>&1; then
   COMPOSE=(podman compose)
 elif command -v podman-compose >/dev/null 2>&1; then
   COMPOSE=(podman-compose)
