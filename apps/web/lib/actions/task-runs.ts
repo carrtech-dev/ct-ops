@@ -7,7 +7,7 @@ import {
   hosts,
   hostGroupMembers,
 } from '@/lib/db/schema'
-import { eq, and, isNull, desc, inArray, or } from 'drizzle-orm'
+import { eq, and, isNull, isNotNull, desc, inArray, or } from 'drizzle-orm'
 import type {
   TaskRun,
   TaskRunHost,
@@ -138,7 +138,9 @@ export async function getTaskRun(
 }
 
 /**
- * Returns the most recent task runs that include a given host (any status).
+ * Returns the most recent user-triggered task runs that include a given host.
+ * Automated runs created by the system sweeper (triggered_by IS NULL) are
+ * excluded — those surface under the host's Logs tab instead.
  * Optionally filtered by task_type.
  */
 export async function listTaskRunsForHost(
@@ -165,6 +167,45 @@ export async function listTaskRunsForHost(
       inArray(taskRuns.id, runIds),
       eq(taskRuns.organisationId, orgId),
       isNull(taskRuns.deletedAt),
+      isNotNull(taskRuns.triggeredBy),
+      ...(taskType ? [eq(taskRuns.taskType, taskType as TaskType)] : []),
+    ),
+    orderBy: [desc(taskRuns.createdAt)],
+    limit: 50,
+  })
+
+  return Promise.all(runs.map((run) => getTaskRun(orgId, run.id).then((r) => r!)))
+}
+
+/**
+ * Returns the most recent automated (system-triggered) task runs for a host.
+ * These are runs created by the ingest sweepers — e.g. software inventory
+ * scans — and have triggered_by IS NULL. Rendered under the host's Logs tab.
+ */
+export async function listAutomatedRunsForHost(
+  orgId: string,
+  hostId: string,
+  taskType?: string,
+): Promise<TaskRunWithHosts[]> {
+  const hostRunRows = await db.query.taskRunHosts.findMany({
+    where: and(
+      eq(taskRunHosts.hostId, hostId),
+      eq(taskRunHosts.organisationId, orgId),
+      isNull(taskRunHosts.deletedAt),
+    ),
+    columns: { taskRunId: true },
+  })
+
+  if (hostRunRows.length === 0) return []
+
+  const runIds = [...new Set(hostRunRows.map((r) => r.taskRunId))]
+
+  const runs = await db.query.taskRuns.findMany({
+    where: and(
+      inArray(taskRuns.id, runIds),
+      eq(taskRuns.organisationId, orgId),
+      isNull(taskRuns.deletedAt),
+      isNull(taskRuns.triggeredBy),
       ...(taskType ? [eq(taskRuns.taskType, taskType as TaskType)] : []),
     ),
     orderBy: [desc(taskRuns.createdAt)],

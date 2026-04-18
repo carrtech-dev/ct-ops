@@ -62,6 +62,7 @@ import { HostNotificationCharts } from './host-notification-charts'
 import { SettingsTab } from './settings-tab'
 import { LocalUsersTab } from './local-users-tab'
 import { TasksTab } from './tasks-tab'
+import { LogsTab } from './logs-tab'
 import { InventoryTab } from './inventory-tab'
 import { HostTerminalLauncher } from './host-terminal-launcher'
 import { checkTerminalAccess } from '@/lib/actions/terminal'
@@ -75,7 +76,7 @@ import type { HostGroupWithCount } from '@/lib/actions/host-groups'
 import type { NetworkWithMembership, NetworkWithCount } from '@/lib/actions/networks'
 
 type ParentTabId = 'overview' | 'monitoring' | 'infrastructure' | 'inventory' | 'management' | 'tools'
-type Tab = 'overview' | 'storage' | 'network' | 'metrics' | 'checks' | 'alerts' | 'users' | 'settings' | 'groups' | 'host-networks' | 'tasks' | 'terminal' | 'packages'
+type Tab = 'overview' | 'storage' | 'network' | 'metrics' | 'checks' | 'alerts' | 'users' | 'settings' | 'groups' | 'host-networks' | 'tasks' | 'logs' | 'terminal' | 'packages'
 
 const TAB_LABELS: Record<Tab, string> = {
   overview: 'Overview',
@@ -89,6 +90,7 @@ const TAB_LABELS: Record<Tab, string> = {
   groups: 'Groups',
   'host-networks': 'Networks',
   tasks: 'Tasks',
+  logs: 'Logs',
   terminal: 'Terminal',
   packages: 'Packages',
 }
@@ -104,7 +106,7 @@ const PARENT_TABS: Array<{
   { id: 'infrastructure', label: 'Infrastructure', defaultTab: 'storage', children: ['storage', 'network'] },
   { id: 'inventory', label: 'Inventory', defaultTab: 'packages', children: ['packages'] },
   { id: 'management', label: 'Management', defaultTab: 'groups', children: ['users', 'groups', 'host-networks', 'settings'] },
-  { id: 'tools', label: 'Tools', defaultTab: 'tasks', children: ['tasks', 'terminal'] },
+  { id: 'tools', label: 'Tools', defaultTab: 'tasks', children: ['tasks', 'logs', 'terminal'] },
 ]
 
 interface Props {
@@ -1131,6 +1133,11 @@ export function HostDetailClient({ host: initialHost, orgId, currentUserId, user
       {/* Tasks Tab */}
       {activeTab === 'tasks' && (
         <TasksTab orgId={orgId} host={host} userId={currentUserId} />
+      )}
+
+      {/* Logs Tab */}
+      {activeTab === 'logs' && (
+        <LogsTab orgId={orgId} hostId={initialHost.id} />
       )}
 
       {/* Terminal Tab */}
