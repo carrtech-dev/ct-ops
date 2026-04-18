@@ -4,21 +4,28 @@ The SSL Certificate Checker is an interactive tool in the **Tooling** section th
 
 ## Features
 
-- **Upload a certificate** in PEM, DER, PKCS#7 (.p7b), or PKCS#12 (.pfx/.p12) formats
+- **Three ways to supply a certificate** — drag-and-drop a file, click to browse, or paste PEM text directly
 - **Fetch live certificates** directly from any TLS-protected URL or hostname
-- **Validate a private key** against the loaded certificate to confirm they match
+- **Inline private key validation** — optionally supply a private key (dropped, uploaded, or pasted) and the match result is returned alongside the certificate details
+- **Supports PEM, DER, PKCS#7 (.p7b), and PKCS#12 (.pfx/.p12)** formats
 - **Download certificates** in PEM, DER, or PKCS#7 format
 - **Full certificate detail** — every field extracted and displayed in a readable layout
 
 ## How to Use
 
-### 1. Upload a Certificate File
+### 1. Supply a Certificate (Upload / Paste)
 
 1. Navigate to **Tooling → SSL Certificate Checker** in the sidebar.
-2. Select the **Upload File** tab.
-3. Drag-and-drop or click to browse for your certificate file.
+2. Select the **Upload / Paste** tab.
+3. Provide the certificate in whichever way is easiest:
+   - **Drag-and-drop** a file onto the drop zone
+   - **Click** the drop zone to browse for a file
+   - **Paste** PEM-encoded text directly into the textarea
 4. For PKCS#12 (`.pfx` / `.p12`) files, enter the password in the **Password** field that appears.
-5. Click **Analyse Certificate**.
+5. (Optional) Supply a private key in the **Private Key** field — drop, browse, or paste — to validate it against the certificate in the same request.
+6. Click **Analyse Certificate**.
+
+PEM/text files (`.pem`, `.crt`, `.cer`, `.key`) dropped onto the zone are read as text and auto-populate the paste area so you can review the content before submitting. Binary files (DER, PKCS#12) are kept as file references and sent as base64.
 
 Supported formats:
 
@@ -35,17 +42,16 @@ Supported formats:
 2. Enter a hostname or full URL (e.g. `example.com` or `https://example.com`).
 3. Adjust **Port** if the service isn't on 443.
 4. Optionally set an **SNI Override** if the TLS server name differs from the hostname (useful for IP addresses or CDN backends).
-5. Click **Fetch Certificate**.
+5. (Optional) Supply a private key in the **Private Key** field to validate it against the fetched certificate.
+6. Click **Fetch Certificate**.
 
 The tool connects server-side, so it can reach internal hosts that your browser cannot access directly.
 
-### 3. Validate a Private Key
+### 3. Private Key Validation
 
-After loading a certificate, a **Validate Private Key** panel appears at the bottom of the results.
+The private key field is available **upfront** on both the Upload/Paste and Check URL tabs — you don't need to wait for the certificate to load first. Validation runs in the same API call as certificate parsing/fetching, and the match result appears alongside the certificate details.
 
-1. Paste the PEM-encoded private key into the text area.
-2. Click **Validate Key**.
-3. A green or red banner will confirm whether the key matches the certificate's public key.
+A green banner confirms the key matches the certificate's public key; a red banner indicates a mismatch.
 
 ::: tip
 The private key is transmitted to the server for validation and is not stored. For sensitive keys, use this tool only on trusted internal deployments.

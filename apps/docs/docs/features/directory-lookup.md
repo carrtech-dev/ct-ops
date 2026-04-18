@@ -34,8 +34,8 @@ Once a user is selected, Infrawatch queries the directory for all attributes on 
 - **Password** — expires, last changed, account locked status
     - Active Directory: parses `msDS-UserPasswordExpiryTimeComputed`, `accountExpires`, `pwdLastSet`, `lockoutTime`, `userAccountControl`
     - OpenLDAP / shadow: parses `shadowLastChange`, `shadowMax`, `pwdChangedTime`, `pwdAccountLockedTime`
-- **Groups** — full list of `memberOf` group DNs, with a client-side filter for directories where a single user may belong to hundreds of groups. Each entry shows the group's common name with the full DN beneath, and a copy button.
-- **All LDAP Attributes** — a collapsible table showing every attribute returned for the user, with its own search filter so you can quickly find what you need. Binary values render as `[binary NB]`; password-hash attributes are excluded for safety.
+- **Groups** — full list of `memberOf` group DNs, with a client-side filter that appears whenever the user has any group memberships. Each entry shows the group's common name with the full DN beneath, and a copy button.
+- **All LDAP Attributes** — a collapsible table showing every attribute returned for the user, with its own search filter so you can quickly find what you need. Windows file-time and LDAP generalized-time values are converted to human-readable dates with the raw value shown below in smaller text. Binary values render as `[binary NB]`; password-hash attributes are excluded for safety.
 
 ---
 

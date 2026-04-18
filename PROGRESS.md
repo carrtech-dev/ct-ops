@@ -9,11 +9,130 @@
 **Phase 5 — Tooling (in progress)**
 
 ## Current Status
-🟢 Phase 5 progressing — VuePress docs site live; networks (CIDR auto-assignment) and interactive network topology graphs shipped; terminal panel evolved into a full tabbed/split VS Code-style workspace with per-tab colours, reorder, splits, and adjustable text size.
+🟢 Phase 5 progressing — two new Tooling utilities shipped (Directory User Lookup for live LDAP/AD queries, SSL Certificate Checker for parse/fetch/validate/convert of X.509 certs); offline agent install bundle (zip) for air-gapped enrolment; ingest-side host deduplication by hostname / IP overlap; repo/image rename to `carrtech-dev` and enrolment-URL env-var plumbing; plus the established VuePress docs, networks (CIDR + graph view), and split-pane terminal workspace.
 
 ---
 
 ## What Has Been Built
+
+### Session 53 — SSL Certificate Checker tool
+
+**New tooling page** (`apps/web/app/(dashboard)/certificate-checker/`, `apps/web/app/api/tools/certificate-checker/route.ts`)
+- Interactive X.509 cert inspector — no `openssl` needed locally
+- Supply the cert three ways on one tab: drag-and-drop a file, click to browse, or paste PEM text directly — PEM drops auto-populate the textarea, binary drops (DER/PKCS#12) are sent as base64
+- **Check URL** tab: server-side TLS connect to any host:port with optional SNI override — internal hosts reachable from the web container are inspectable
+- **Private key validation** is upfront on both tabs; match result returned in the same API call as parse/fetch
+- Download the leaf cert in PEM, DER, or PKCS#7
+- Supports PEM, DER, PKCS#7 (`.p7b`), PKCS#12 (`.pfx`/`.p12` with password) input formats
+- Full detail rendering: subject/issuer DN, validity, SHA-1/256/512 fingerprints, key algo/size/curve, all extensions (KU, EKU, SANs, policies, basic constraints, AKI/SKI), OCSP/CRL/CA-issuer URLs, chain table, raw PEM with copy
+- `node-forge` added for PKCS#7/PKCS#12 parsing; new `tabs.tsx` shadcn primitive from Radix
+- Docs: new `apps/docs/docs/features/certificate-checker.md` (updated for paste + drag-drop + inline key validation)
+- PRs: carrtech-dev/ct-ops#252 (initial tool), #257 (paste + drag-drop)
+
+**Build state**
+- `pnpm run build` — zero TypeScript errors ✅
+
+---
+
+### Session 52 — Repo rename + agent enrolment URL env var plumbing
+
+**Repo/image rename** — the repository moved to `carrtech-dev/ct-ops`, so container images now publish to `ghcr.io/carrtech-dev/infrawatch/*`
+- Updated hardcoded references in `docker-compose.single.yml`, `.env.example`, customer-bundle README, and `apps/docs/docs/deployment/docker-compose.md`
+- PR: carrtech-dev/ct-ops#253
+
+**Enrolment URL env var** (`apps/web/app/(dashboard)/settings/agents/`, `apps/web/.env.example`, `docker-compose.single.yml`)
+- Agent enrolment `curl` install command was showing `localhost` when the UI was reached via port-forward/proxy
+- New `getAppOrigin()` helper initially backed by `NEXT_PUBLIC_APP_URL`, then unified onto the existing `AGENT_DOWNLOAD_BASE_URL` env var so one variable drives both the ingest service and the web UI's install command
+- `AGENT_DOWNLOAD_BASE_URL` also propagated to the web service in `docker-compose.single.yml` (previously only wired to ingest, so `process.env` was undefined in the Next.js server component)
+- Falls back to `window.location.origin` when unset, preserving zero-config local dev
+- PRs: carrtech-dev/ct-ops#254, #258
+
+**Build state**
+- `pnpm run build` — zero TypeScript errors ✅
+
+---
+
+### Session 51 — Host registration deduplication (hostname / IP overlap)
+
+**Ingest-side dedup** (`apps/ingest/internal/handlers/register.go`, `apps/ingest/internal/db/queries/hosts.sql.go`, `agent/internal/registration/registrar.go`)
+- Two live hosts in the same org cannot share a hostname or IP — guard now runs at `Register` and at `approveAgent`
+- **Online or revoked match** → reject with `ALREADY_EXISTS` so the admin deletes the stale record first
+- **Offline / unknown match** → adopt the existing `agents`/`hosts` rows, rotate the new public key onto the existing agent, and preserve approval state — covers reinstall-with-wiped-data-dir cases that previously produced a duplicate "Offline" record
+- Agents now report non-loopback IPs in `PlatformInfo` at register time so the server can run the overlap check
+- Key rotation appended to agent status history with reason `"adopted re-registration (keypair rotated; matched by hostname or IP)"` for audit
+- `apps/web/lib/actions/agents.ts` also hardened against approving a pending agent that now collides with a live host
+
+**Docs**
+- `apps/docs/docs/architecture/ingest.md` + `apps/docs/docs/features/hosts.md` — new Duplicate-Host Protection section
+
+**Build state**
+- `pnpm run build` — zero TypeScript errors ✅
+- `go build ./...` — zero errors ✅
+
+---
+
+### Session 50 — Offline agent install bundle (zip download)
+
+**New download route** (`apps/web/app/api/agent/bundle/route.ts`, `apps/web/lib/agent/bundle.ts`, `apps/web/lib/agent/binary.ts`)
+- **Settings → Agent Enrolment → Download Install Bundle** — produces a per-OS/arch zip containing the agent binary, install helper (`install.sh` on Linux/macOS, `install.ps1` on Windows), pre-populated `agent.toml`, `SHA256SUMS`, and a `README.md`
+- Three token options: generate a fresh single-use token (default 7-day expiry), embed an existing active token, or ship without a token (operator exports `INFRAWATCH_ORG_TOKEN` before install)
+- Gated to `super_admin` / `org_admin`; scoped by `organisationId`; single-use tokens persisted via `agent_enrolment_tokens` with `metadata.source = 'install-bundle'` and `metadata.os` / `metadata.arch` for audit
+- Shared binary resolver extracted to `apps/web/lib/agent/binary.ts` so the new route reuses the download route's cache / GitHub-release / baked-binary fallback
+- Zip built with `jszip`
+- Closes carrtech-dev/ct-ops#244; PR #250
+
+**Docs**
+- New `apps/docs/docs/getting-started/agent-install-bundle.md` (full install walk-through, token audit-trail, troubleshooting)
+- Cross-links added to `apps/docs/docs/deployment/air-gap.md`, `apps/docs/docs/architecture/agent.md`, and top-level `README.md` so the bundle is discoverable as the air-gap enrolment path
+
+**Build state**
+- `pnpm run build` — zero TypeScript errors ✅
+
+---
+
+### Session 49 — Terminal panel SSR hydration fix
+
+**Root cause** (`apps/web/components/terminal/terminal-panel-context.tsx`)
+- `useState` initialiser was reading `sessionStorage` on the client, producing HTML that differed from the server render whenever the terminal panel had persisted tabs
+- Resulting React #418 hydration mismatch aborted hydration for the entire dashboard tree, leaving client components (notably the directory-lookup typeahead) non-interactive
+
+**Fix**
+- Start with `DEFAULT_STATE` on server and client; load persisted state in a post-mount effect gated by a `hasHydrated` flag so the initial empty state doesn't wipe `sessionStorage`
+- `set-state-in-effect` lint rule disabled around the one-shot hydration effect with a comment explaining the canonical pattern
+- PRs: carrtech-dev/ct-ops#243, #246
+
+**Build state**
+- `pnpm run build` — zero TypeScript errors ✅
+
+---
+
+### Session 48 — Directory User Lookup (live LDAP/AD query)
+
+**New tooling page** (`apps/web/app/(dashboard)/directory-lookup/`, `apps/web/lib/actions/ldap-lookup.ts`)
+- **Tooling → Directory User Lookup** — on-demand queries against any configured LDAP/AD server; nothing is synced or stored
+- Username typeahead (debounced, prefix-matched via `{{username}}*` on the configured `userSearchFilter`), directory picker when multiple configs exist
+- Selecting a user fetches the full attribute set (including operational attrs via `+`) and renders:
+  - Summary: display name, username, lock/active status, email, sAMAccountName, UPN, copyable DN
+  - Password: expires, last changed, lock status — parses both AD (`msDS-UserPasswordExpiryTimeComputed`, `accountExpires`, `pwdLastSet`, `lockoutTime`, `userAccountControl`) and OpenLDAP/shadow (`shadowLastChange`, `shadowMax`, `pwdChangedTime`, `pwdAccountLockedTime`)
+  - Groups: full `memberOf` list with CN + DN, copy button, and client-side filter visible whenever the user has any groups
+  - All LDAP Attributes: searchable table of every returned attribute, with Windows file-time / LDAP generalized-time values rendered as human-readable dates and the raw value shown below; binary values as `[binary NB]`; password-hash attributes excluded for safety
+- Removed unused sync scaffolding from `ldap_configurations` (`lastSyncAt`, `syncIntervalMinutes`, etc.) and LDAP-sourced columns from `domain_accounts` (`ldapConfigurationId`, `distinguishedName`, `groups`) — the Service Accounts register is now manual-only; live queries go through this tool
+- Any authenticated org user can run a lookup; managing LDAP configs remains `org_admin` / `super_admin`
+
+**Follow-up fixes during the same afternoon**
+- **Server-action error surfacing** — `searchLdapDirectory` / `lookupDirectoryUser` wrapped in try/catch/finally so a stale client bundle (e.g. after a deploy) no longer leaves the typeahead silently stuck on the spinner; users see a "please reload" message (PR #242)
+- **Portal the suggestions dropdown** — the Card ancestor's `overflow-hidden` clipped the absolutely-positioned dropdown; now rendered via `createPortal` on `document.body` with the input's `getBoundingClientRect` tracked on resize/scroll (PR #247)
+- **Group filter always visible + humanised LDAP timestamps** — filter shows whenever there is any group (was >5); attribute table humanises Windows file-time / LDAP generalized-time (PR #249)
+
+**Docs**
+- New `apps/docs/docs/features/directory-lookup.md` (+ sidebar)
+- `apps/docs/docs/features/service-accounts.md` updated to direct live lookups to the new tool
+- Earlier in the same day, `apps/docs/docs/features/networks.md` gained a Graph View section covering the Table/Graph toggle, dashed-bezier edges, dark-mode, and the right-click host-node context menu shipped in Session 45; CLAUDE.md's stale Docusaurus reference replaced with the VuePress path (PR #239)
+
+**Build state**
+- `pnpm run build` — zero TypeScript errors ✅
+
+---
 
 ### Session 47 — Terminal text size settings
 
