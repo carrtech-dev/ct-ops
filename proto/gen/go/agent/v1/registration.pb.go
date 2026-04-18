@@ -21,19 +21,72 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type Tag struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Key           string                 `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`
+	Value         string                 `protobuf:"bytes,2,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Tag) Reset() {
+	*x = Tag{}
+	mi := &file_agent_v1_registration_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Tag) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Tag) ProtoMessage() {}
+
+func (x *Tag) ProtoReflect() protoreflect.Message {
+	mi := &file_agent_v1_registration_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Tag.ProtoReflect.Descriptor instead.
+func (*Tag) Descriptor() ([]byte, []int) {
+	return file_agent_v1_registration_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *Tag) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *Tag) GetValue() string {
+	if x != nil {
+		return x.Value
+	}
+	return ""
+}
+
 type RegisterRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	OrgToken      string                 `protobuf:"bytes,1,opt,name=org_token,json=orgToken,proto3" json:"org_token,omitempty"`    // enrolment token from UI
 	PublicKey     string                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"` // PEM-encoded Ed25519 public key
 	PlatformInfo  *PlatformInfo          `protobuf:"bytes,3,opt,name=platform_info,json=platformInfo,proto3" json:"platform_info,omitempty"`
 	AgentInfo     *AgentInfo             `protobuf:"bytes,4,opt,name=agent_info,json=agentInfo,proto3" json:"agent_info,omitempty"`
+	Tags          []*Tag                 `protobuf:"bytes,5,rep,name=tags,proto3" json:"tags,omitempty"` // tags applied at registration (CLI + config merged)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RegisterRequest) Reset() {
 	*x = RegisterRequest{}
-	mi := &file_agent_v1_registration_proto_msgTypes[0]
+	mi := &file_agent_v1_registration_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -45,7 +98,7 @@ func (x *RegisterRequest) String() string {
 func (*RegisterRequest) ProtoMessage() {}
 
 func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_registration_proto_msgTypes[0]
+	mi := &file_agent_v1_registration_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -58,7 +111,7 @@ func (x *RegisterRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterRequest.ProtoReflect.Descriptor instead.
 func (*RegisterRequest) Descriptor() ([]byte, []int) {
-	return file_agent_v1_registration_proto_rawDescGZIP(), []int{0}
+	return file_agent_v1_registration_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *RegisterRequest) GetOrgToken() string {
@@ -89,6 +142,13 @@ func (x *RegisterRequest) GetAgentInfo() *AgentInfo {
 	return nil
 }
 
+func (x *RegisterRequest) GetTags() []*Tag {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
 type RegisterResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	AgentId       string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
@@ -101,7 +161,7 @@ type RegisterResponse struct {
 
 func (x *RegisterResponse) Reset() {
 	*x = RegisterResponse{}
-	mi := &file_agent_v1_registration_proto_msgTypes[1]
+	mi := &file_agent_v1_registration_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -113,7 +173,7 @@ func (x *RegisterResponse) String() string {
 func (*RegisterResponse) ProtoMessage() {}
 
 func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agent_v1_registration_proto_msgTypes[1]
+	mi := &file_agent_v1_registration_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -126,7 +186,7 @@ func (x *RegisterResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RegisterResponse.ProtoReflect.Descriptor instead.
 func (*RegisterResponse) Descriptor() ([]byte, []int) {
-	return file_agent_v1_registration_proto_rawDescGZIP(), []int{1}
+	return file_agent_v1_registration_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *RegisterResponse) GetAgentId() string {
@@ -161,14 +221,18 @@ var File_agent_v1_registration_proto protoreflect.FileDescriptor
 
 const file_agent_v1_registration_proto_rawDesc = "" +
 	"\n" +
-	"\x1bagent/v1/registration.proto\x12\bagent.v1\x1a\x14agent/v1/agent.proto\"\xbe\x01\n" +
+	"\x1bagent/v1/registration.proto\x12\bagent.v1\x1a\x14agent/v1/agent.proto\"-\n" +
+	"\x03Tag\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value\"\xe1\x01\n" +
 	"\x0fRegisterRequest\x12\x1b\n" +
 	"\torg_token\x18\x01 \x01(\tR\borgToken\x12\x1d\n" +
 	"\n" +
 	"public_key\x18\x02 \x01(\tR\tpublicKey\x12;\n" +
 	"\rplatform_info\x18\x03 \x01(\v2\x16.agent.v1.PlatformInfoR\fplatformInfo\x122\n" +
 	"\n" +
-	"agent_info\x18\x04 \x01(\v2\x13.agent.v1.AgentInfoR\tagentInfo\"|\n" +
+	"agent_info\x18\x04 \x01(\v2\x13.agent.v1.AgentInfoR\tagentInfo\x12!\n" +
+	"\x04tags\x18\x05 \x03(\v2\r.agent.v1.TagR\x04tags\"|\n" +
 	"\x10RegisterResponse\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x16\n" +
 	"\x06status\x18\x02 \x01(\tR\x06status\x12\x18\n" +
@@ -187,21 +251,23 @@ func file_agent_v1_registration_proto_rawDescGZIP() []byte {
 	return file_agent_v1_registration_proto_rawDescData
 }
 
-var file_agent_v1_registration_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
+var file_agent_v1_registration_proto_msgTypes = make([]protoimpl.MessageInfo, 3)
 var file_agent_v1_registration_proto_goTypes = []any{
-	(*RegisterRequest)(nil),  // 0: agent.v1.RegisterRequest
-	(*RegisterResponse)(nil), // 1: agent.v1.RegisterResponse
-	(*PlatformInfo)(nil),     // 2: agent.v1.PlatformInfo
-	(*AgentInfo)(nil),        // 3: agent.v1.AgentInfo
+	(*Tag)(nil),              // 0: agent.v1.Tag
+	(*RegisterRequest)(nil),  // 1: agent.v1.RegisterRequest
+	(*RegisterResponse)(nil), // 2: agent.v1.RegisterResponse
+	(*PlatformInfo)(nil),     // 3: agent.v1.PlatformInfo
+	(*AgentInfo)(nil),        // 4: agent.v1.AgentInfo
 }
 var file_agent_v1_registration_proto_depIdxs = []int32{
-	2, // 0: agent.v1.RegisterRequest.platform_info:type_name -> agent.v1.PlatformInfo
-	3, // 1: agent.v1.RegisterRequest.agent_info:type_name -> agent.v1.AgentInfo
-	2, // [2:2] is the sub-list for method output_type
-	2, // [2:2] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	3, // 0: agent.v1.RegisterRequest.platform_info:type_name -> agent.v1.PlatformInfo
+	4, // 1: agent.v1.RegisterRequest.agent_info:type_name -> agent.v1.AgentInfo
+	0, // 2: agent.v1.RegisterRequest.tags:type_name -> agent.v1.Tag
+	3, // [3:3] is the sub-list for method output_type
+	3, // [3:3] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_agent_v1_registration_proto_init() }
@@ -216,7 +282,7 @@ func file_agent_v1_registration_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agent_v1_registration_proto_rawDesc), len(file_agent_v1_registration_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   2,
+			NumMessages:   3,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

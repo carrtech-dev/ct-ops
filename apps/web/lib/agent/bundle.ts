@@ -15,6 +15,45 @@ export interface BundleOptions {
   tokenExpiresAt?: Date
   /** Version string of the binary for the README (e.g. "v0.9.0"). */
   agentVersion: string
+  /** Tags to apply on every registration from this bundle. Embedded into agent.toml and passed as --tag flags into the installer. */
+  tags?: Array<{ key: string; value: string }>
+}
+
+function escapeToml(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+}
+
+function renderTagTomlLine(tags: Array<{ key: string; value: string }> | undefined): string {
+  if (!tags || tags.length === 0) {
+    return `# Tags applied on every registration. Each entry is "key:value".
+# tags = ["env:prod", "team:platform"]
+tags = []`
+  }
+  const rendered = tags
+    .map((t) => `"${escapeToml(t.key)}:${escapeToml(t.value)}"`)
+    .join(', ')
+  return `# Tags applied on every registration. Each entry is "key:value".
+tags = [${rendered}]`
+}
+
+function renderUnixTagFlags(tags: Array<{ key: string; value: string }> | undefined): string {
+  if (!tags || tags.length === 0) return ''
+  return tags
+    .map((t) => {
+      const kv = `${t.key}=${t.value}`.replace(/"/g, '\\"')
+      return ` --tag "${kv}"`
+    })
+    .join('')
+}
+
+function renderWindowsTagFlags(tags: Array<{ key: string; value: string }> | undefined): string {
+  if (!tags || tags.length === 0) return ''
+  return tags
+    .map((t) => {
+      const kv = `${t.key}=${t.value}`.replace(/"/g, '`"')
+      return ` --tag "${kv}"`
+    })
+    .join('')
 }
 
 /**
@@ -106,6 +145,8 @@ data_dir = "/var/lib/infrawatch/agent"
 
 # How often to send a heartbeat to the ingest service (seconds)
 heartbeat_interval_secs = 30
+
+${renderTagTomlLine(opts.tags)}
 `
 }
 
@@ -146,7 +187,7 @@ fi
 chmod +x "\$BINARY"
 
 echo "Installing infrawatch-agent..."
-"\$BINARY" --install --token ${tokenArg} --address "${opts.ingestAddress}"${tlsFlag}
+"\$BINARY" --install --token ${tokenArg} --address "${opts.ingestAddress}"${tlsFlag}${renderUnixTagFlags(opts.tags)}
 `
 }
 
@@ -186,7 +227,7 @@ if ($expected -ne $actual) {
 Write-Host "Checksum OK."
 
 Write-Host "Installing infrawatch-agent..."
-& $Binary --install --token ${tokenExpr} --address "${opts.ingestAddress}"${tlsFlag}
+& $Binary --install --token ${tokenExpr} --address "${opts.ingestAddress}"${tlsFlag}${renderWindowsTagFlags(opts.tags)}
 `
 }
 

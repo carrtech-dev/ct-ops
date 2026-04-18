@@ -3,6 +3,13 @@ import { createId } from '@paralleldrive/cuid2'
 import { organisations } from './organisations'
 import { users } from './auth'
 
+export interface AgentEnrolmentTokenMetadata {
+  tags?: Array<{ key: string; value: string }>
+  source?: string
+  os?: string
+  arch?: string
+}
+
 export const agentEnrolmentTokens = pgTable('agent_enrolment_tokens', {
   id: text('id').primaryKey().$defaultFn(() => createId()),
   organisationId: text('organisation_id')
@@ -21,7 +28,7 @@ export const agentEnrolmentTokens = pgTable('agent_enrolment_tokens', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
-  metadata: jsonb('metadata'),
+  metadata: jsonb('metadata').$type<AgentEnrolmentTokenMetadata>(),
 })
 
 export const agents = pgTable('agents', {

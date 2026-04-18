@@ -6,11 +6,17 @@ import "agent/v1/agent.proto";
 
 option go_package = "github.com/infrawatch/proto/agent/v1;agentv1";
 
+message Tag {
+  string key = 1;
+  string value = 2;
+}
+
 message RegisterRequest {
   string org_token = 1;    // enrolment token from UI
   string public_key = 2;   // PEM-encoded Ed25519 public key
   PlatformInfo platform_info = 3;
   AgentInfo agent_info = 4;
+  repeated Tag tags = 5;   // tags applied at registration (CLI + config merged)
 }
 
 message RegisterResponse {

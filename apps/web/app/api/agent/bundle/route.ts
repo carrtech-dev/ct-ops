@@ -29,10 +29,17 @@ const requestSchema = z.object({
       autoApprove: z.boolean().default(false),
       skipVerify: z.boolean().default(false),
       expiresInDays: z.number().int().positive().max(365).default(7),
+      tags: z
+        .array(z.object({ key: z.string().min(1).max(100), value: z.string().min(1).max(500) }))
+        .default([]),
     })
     .optional(),
   /** Override the skip_verify flag written into the config (defaults to the token's value or false). */
   skipVerify: z.boolean().optional(),
+  /** Tags baked directly into agent.toml / install script (applied on every registration). */
+  tags: z
+    .array(z.object({ key: z.string().min(1).max(100), value: z.string().min(1).max(500) }))
+    .default([]),
 })
 
 /**
@@ -84,6 +91,7 @@ export async function POST(request: NextRequest) {
   let embeddedToken: string | undefined
   let embeddedTokenExpiresAt: Date | undefined
   let effectiveSkipVerify = parsed.data.skipVerify ?? false
+  let bundleTags: Array<{ key: string; value: string }> = [...parsed.data.tags]
 
   if (tokenId) {
     const existing = await db.query.agentEnrolmentTokens.findFirst({
@@ -107,6 +115,10 @@ export async function POST(request: NextRequest) {
     if (parsed.data.skipVerify === undefined) {
       effectiveSkipVerify = existing.skipVerify
     }
+    const tokenMetaTags = existing.metadata?.tags ?? []
+    if (bundleTags.length === 0 && tokenMetaTags.length > 0) {
+      bundleTags = [...tokenMetaTags]
+    }
   } else if (createToken) {
     const expiresAt = new Date()
     expiresAt.setDate(expiresAt.getDate() + createToken.expiresInDays)
@@ -124,6 +136,7 @@ export async function POST(request: NextRequest) {
           source: 'install-bundle',
           os,
           arch,
+          ...(createToken.tags.length > 0 ? { tags: createToken.tags } : {}),
         },
       })
       .returning()
@@ -135,6 +148,9 @@ export async function POST(request: NextRequest) {
     embeddedTokenExpiresAt = record.expiresAt ?? undefined
     if (parsed.data.skipVerify === undefined) {
       effectiveSkipVerify = createToken.skipVerify
+    }
+    if (bundleTags.length === 0 && createToken.tags.length > 0) {
+      bundleTags = [...createToken.tags]
     }
   }
 
@@ -162,6 +178,7 @@ export async function POST(request: NextRequest) {
     token: embeddedToken,
     tokenExpiresAt: embeddedTokenExpiresAt,
     agentVersion: REQUIRED_AGENT_VERSION,
+    tags: bundleTags,
   })
 
   return new NextResponse(new Uint8Array(bundle.zipBytes), {

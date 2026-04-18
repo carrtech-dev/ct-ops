@@ -1,6 +1,7 @@
-import { pgTable, text, timestamp, index } from 'drizzle-orm/pg-core'
+import { pgTable, text, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core'
 import { createId } from '@paralleldrive/cuid2'
 import { organisations } from './organisations'
+import { tags } from './tags'
 
 export const resourceTags = pgTable(
   'resource_tags',
@@ -11,13 +12,19 @@ export const resourceTags = pgTable(
       .references(() => organisations.id),
     resourceId: text('resource_id').notNull(),
     resourceType: text('resource_type').notNull(),
-    key: text('key').notNull(),
-    value: text('value').notNull(),
+    tagId: text('tag_id')
+      .notNull()
+      .references(() => tags.id, { onDelete: 'restrict' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
     index('resource_tags_resource_idx').on(table.resourceId, table.resourceType),
-    index('resource_tags_org_kv_idx').on(table.organisationId, table.key, table.value),
+    index('resource_tags_tag_idx').on(table.tagId),
+    uniqueIndex('resource_tags_unique_uidx').on(
+      table.resourceId,
+      table.resourceType,
+      table.tagId,
+    ),
   ],
 )
 

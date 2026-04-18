@@ -33,7 +33,9 @@ import type { Agent, AgentEnrolmentToken, Host, HostMetric } from '@/lib/db/sche
 import { applyGlobalDefaultsToHost } from '@/lib/actions/alerts'
 import { getOrgDefaultCollectionSettings } from '@/lib/actions/host-settings'
 import { triggerAgentUninstall, getTaskRun } from '@/lib/actions/task-runs'
-import type { HostMetadata } from '@/lib/db/schema'
+import { assignTagsToResource, getOrgDefaultTags, mergeTagLayers } from '@/lib/actions/tags'
+import { runMatchingTagRules } from '@/lib/actions/tag-rules'
+import type { HostMetadata, TagPair } from '@/lib/db/schema'
 
 export type OfflinePeriod = { start: number; end: number | null }
 
@@ -43,6 +45,9 @@ const createEnrolmentTokenSchema = z.object({
   skipVerify: z.boolean().default(false),
   maxUses: z.number().int().positive().optional(),
   expiresInDays: z.number().int().positive().optional(),
+  tags: z
+    .array(z.object({ key: z.string().min(1).max(100), value: z.string().min(1).max(500) }))
+    .default([]),
 })
 
 export async function listPendingAgents(orgId: string): Promise<Agent[]> {
@@ -115,16 +120,39 @@ export async function approveAgent(
     if (host) {
       await applyGlobalDefaultsToHost(orgId, host.id)
 
-      // Apply org default collection settings to the new host
+      // Apply org default collection settings + drain any pendingTags the
+      // ingest handler stashed at register time. pendingTags already represent
+      // the (token → CLI) merge on the ingest side; here we layer org defaults
+      // underneath (weakest), then run any saved tag_rules last.
       const defaults = await getOrgDefaultCollectionSettings(orgId)
       const currentMetadata = (host.metadata ?? { disks: [], network_interfaces: [] }) as HostMetadata
+      const pendingTags: TagPair[] = currentMetadata.pendingTags ?? []
+      const orgDefaultTags = await getOrgDefaultTags(orgId)
+      const finalTags = await mergeTagLayers(orgDefaultTags, pendingTags)
+
+      const nextMetadata: HostMetadata = {
+        ...currentMetadata,
+        collectionSettings: defaults,
+      }
+      delete nextMetadata.pendingTags
+
       await db
         .update(hosts)
         .set({
-          metadata: { ...currentMetadata, collectionSettings: defaults },
+          metadata: nextMetadata,
           updatedAt: new Date(),
         })
         .where(and(eq(hosts.id, host.id), eq(hosts.organisationId, orgId)))
+
+      if (finalTags.length > 0) {
+        const result = await assignTagsToResource(orgId, 'host', host.id, finalTags)
+        if ('error' in result) {
+          console.warn('Failed to apply tags on approval:', result.error)
+        }
+      }
+
+      // Saved rules run last so they never overwrite explicit per-host intent.
+      await runMatchingTagRules(orgId, host.id)
     }
 
     return { success: true }
@@ -214,7 +242,14 @@ export async function listHosts(orgId: string): Promise<HostWithAgent[]> {
 export async function createEnrolmentToken(
   orgId: string,
   userId: string,
-  input: { label: string; autoApprove: boolean; skipVerify?: boolean; maxUses?: number; expiresInDays?: number },
+  input: {
+    label: string
+    autoApprove: boolean
+    skipVerify?: boolean
+    maxUses?: number
+    expiresInDays?: number
+    tags?: Array<{ key: string; value: string }>
+  },
 ): Promise<{ token: string; id: string } | { error: string }> {
   const parsed = createEnrolmentTokenSchema.safeParse(input)
   if (!parsed.success) {
@@ -238,6 +273,7 @@ export async function createEnrolmentToken(
         skipVerify: parsed.data.skipVerify,
         maxUses: parsed.data.maxUses ?? null,
         expiresAt: expiresAt ?? null,
+        metadata: parsed.data.tags.length > 0 ? { tags: parsed.data.tags } : null,
       })
       .returning()
 

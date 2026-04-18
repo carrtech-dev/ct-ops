@@ -31,6 +31,8 @@ type AgentConfig struct {
 	DataDir string `toml:"data_dir"`
 	// HeartbeatIntervalSecs is how often the agent sends a heartbeat.
 	HeartbeatIntervalSecs int `toml:"heartbeat_interval_secs"`
+	// Tags applied on registration. Each entry is "key:value" or "key=value".
+	Tags []string `toml:"tags"`
 }
 
 // Load reads a TOML config file and applies INFRAWATCH_ environment overrides.

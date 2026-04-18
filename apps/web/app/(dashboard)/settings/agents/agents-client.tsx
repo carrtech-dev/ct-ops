@@ -41,6 +41,7 @@ import {
   revokeEnrolmentToken,
 } from '@/lib/actions/agents'
 import type { AgentEnrolmentToken } from '@/lib/db/schema'
+import { TagEditor, type EditorTag } from '@/components/shared/tag-editor'
 
 const createTokenSchema = z.object({
   label: z.string().min(1, 'Label is required').max(100),
@@ -114,6 +115,7 @@ export function AgentsSettingsClient({
   const [newInstallCommand, setNewInstallCommand] = useState<string | null>(null)
   const [viewToken, setViewToken] = useState<AgentEnrolmentToken | null>(null)
   const [showBundleDialog, setShowBundleDialog] = useState(false)
+  const [tokenTags, setTokenTags] = useState<EditorTag[]>([])
 
   const { data: tokens } = useQuery({
     queryKey: ['enrolment-tokens', orgId],
@@ -145,6 +147,7 @@ export function AgentsSettingsClient({
         maxUses: data.maxUses !== '' && data.maxUses ? Number(data.maxUses) : undefined,
         expiresInDays:
           data.expiresInDays !== '' && data.expiresInDays ? Number(data.expiresInDays) : undefined,
+        tags: tokenTags.map((t) => ({ key: t.key, value: t.value })),
       }),
     onSuccess: (result, variables) => {
       if ('error' in result) return
@@ -152,6 +155,7 @@ export function AgentsSettingsClient({
       setNewTokenValue(result.token)
       setNewInstallCommand(buildInstallCommand(result.token, variables.skipVerify, appUrl))
       reset()
+      setTokenTags([])
     },
   })
 
@@ -325,6 +329,7 @@ export function AgentsSettingsClient({
           if (!open) {
             setNewTokenValue(null)
             setNewInstallCommand(null)
+            setTokenTags([])
           }
         }}
       >
@@ -451,6 +456,15 @@ export function AgentsSettingsClient({
                 </div>
               </div>
 
+              <div className="space-y-2">
+                <Label>Tags (optional)</Label>
+                <p className="text-xs text-muted-foreground">
+                  Applied to every host registered with this token. CLI <code>--tag</code> flags on
+                  the agent override these on matching keys.
+                </p>
+                <TagEditor orgId={orgId} value={tokenTags} onChange={setTokenTags} />
+              </div>
+
               {createMutation.data && 'error' in createMutation.data && (
                 <p className="text-sm text-destructive">{createMutation.data.error}</p>
               )}
@@ -479,6 +493,7 @@ export function AgentsSettingsClient({
         open={showBundleDialog}
         onOpenChange={setShowBundleDialog}
         activeTokens={(tokens ?? []).filter((t) => tokenStatus(t).label === 'Active')}
+        orgId={orgId}
       />
     </div>
   )
@@ -494,9 +509,10 @@ interface BundleDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   activeTokens: AgentEnrolmentToken[]
+  orgId: string
 }
 
-function BundleDialog({ open, onOpenChange, activeTokens }: BundleDialogProps) {
+function BundleDialog({ open, onOpenChange, activeTokens, orgId }: BundleDialogProps) {
   const [os, setOs] = useState<BundleOS>('linux')
   const [arch, setArch] = useState<BundleArch>('amd64')
   const [tokenMode, setTokenMode] = useState<TokenMode>('create')
@@ -506,6 +522,7 @@ function BundleDialog({ open, onOpenChange, activeTokens }: BundleDialogProps) {
   const [skipVerify, setSkipVerify] = useState(true)
   const [ingestAddress, setIngestAddress] = useState('')
   const [existingTokenId, setExistingTokenId] = useState<string>(activeTokens[0]?.id ?? '')
+  const [bundleTags, setBundleTags] = useState<EditorTag[]>([])
   const [error, setError] = useState<string | null>(null)
   const [isGenerating, setIsGenerating] = useState(false)
 
@@ -521,6 +538,8 @@ function BundleDialog({ open, onOpenChange, activeTokens }: BundleDialogProps) {
 
     const body: Record<string, unknown> = { os, arch }
     if (ingestAddress.trim()) body.ingestAddress = ingestAddress.trim()
+    const tagPairs = bundleTags.map((t) => ({ key: t.key, value: t.value }))
+    if (tagPairs.length > 0) body.tags = tagPairs
 
     if (tokenMode === 'create') {
       const days = Number(expiresInDays)
@@ -534,6 +553,7 @@ function BundleDialog({ open, onOpenChange, activeTokens }: BundleDialogProps) {
         autoApprove,
         skipVerify,
         expiresInDays: days,
+        tags: tagPairs,
       }
     } else if (tokenMode === 'existing') {
       if (!existingTokenId) {
@@ -785,6 +805,15 @@ function BundleDialog({ open, onOpenChange, activeTokens }: BundleDialogProps) {
               </Label>
             </div>
           )}
+
+          <div className="space-y-2">
+            <Label>Tags (optional)</Label>
+            <p className="text-xs text-muted-foreground">
+              Baked into <code>agent.toml</code> and applied on every registration from this bundle.
+              Overridden by <code>--tag</code> flags on the agent CLI when keys match.
+            </p>
+            <TagEditor orgId={orgId} value={bundleTags} onChange={setBundleTags} />
+          </div>
 
           {error && <p className="text-sm text-destructive">{error}</p>}
         </div>

@@ -85,15 +85,28 @@ func ReattachHostToAgent(ctx context.Context, pool *pgxpool.Pool, hostID, agentI
 
 // InsertHost inserts a new host row linked to an agent and returns the host ID.
 // Caller should verify no host exists for this agentID before calling.
-func InsertHost(ctx context.Context, pool *pgxpool.Pool, orgID, agentID, hostname, agentOS, agentArch string) (string, error) {
+//
+// pendingTags, when non-empty, are stashed into metadata.pendingTags so that
+// approveAgent (TS) can drain and apply them once the operator approves the
+// agent. The ingest auto-approve path applies tags directly via
+// AssignTagsToResource and passes nil/empty here.
+func InsertHost(ctx context.Context, pool *pgxpool.Pool, orgID, agentID, hostname, agentOS, agentArch string, pendingTags []TagPair) (string, error) {
 	const q = `
-		INSERT INTO hosts (id, organisation_id, agent_id, hostname, os, arch, status)
-		VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), 'unknown')
+		INSERT INTO hosts (id, organisation_id, agent_id, hostname, os, arch, status, metadata)
+		VALUES ($1, $2, $3, $4, NULLIF($5, ''), NULLIF($6, ''), 'unknown', $7::jsonb)
 		RETURNING id
 	`
 	id := newCUID()
 	var returnedID string
-	err := pool.QueryRow(ctx, q, id, orgID, agentID, hostname, agentOS, agentArch).Scan(&returnedID)
+	metaJSON := "{}"
+	if len(pendingTags) > 0 {
+		b, err := json.Marshal(map[string]any{"pendingTags": pendingTags})
+		if err != nil {
+			return "", err
+		}
+		metaJSON = string(b)
+	}
+	err := pool.QueryRow(ctx, q, id, orgID, agentID, hostname, agentOS, agentArch, metaJSON).Scan(&returnedID)
 	return returnedID, err
 }
 

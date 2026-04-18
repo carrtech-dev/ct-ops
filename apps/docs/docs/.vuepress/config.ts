@@ -74,6 +74,7 @@ export default defineUserConfig({
           '/features/service-accounts.md',
           '/features/directory-lookup.md',
           '/features/tasks.md',
+          '/features/tags.md',
         ],
       },
       {
