@@ -18,17 +18,49 @@ Status is derived in real time from the ingest heartbeat stream — there is no 
 
 ---
 
+## Fleet Overview
+
+At the top of the Hosts page you will see a set of summary cards that give a quick read of the state of the fleet before you dig into the table:
+
+- **Total hosts** registered
+- **Online** and **Offline** counts (with the online card showing the percentage of the fleet)
+- **Firing alerts** — the number of distinct hosts with at least one alert currently firing
+- **Stale** — hosts that have not reported a heartbeat in the last 15 minutes (any online heartbeat should arrive well inside that window, so any count here usually means something is wrong)
+- **Pending approval** — agents waiting for an admin to approve them
+
+Below the summary are two further panels:
+
+- **Resource hotspots** — a count of hosts currently at or above **80%** CPU, memory, or disk utilisation. Useful for catching capacity pressure on a busy day before alerts fire.
+- **Operating systems** — a breakdown of the fleet by OS, with a bar showing each OS's share. Clicking an OS name filters the host list to that OS.
+
+All of the summary numbers are computed server-side and refresh every 30 seconds, so they stay current without needing a page reload.
+
+---
+
 ## Host List
 
 The hosts table shows:
 - Hostname
-- IP address
 - OS / platform
+- IP addresses
+- Current CPU / memory / disk percentages (values at or above 80% are highlighted in red)
 - Last seen timestamp
-- Current CPU / memory / disk percentages
+- Count of active alerts for the host
 - Status badge
 
 Clicking a hostname opens the host detail page.
+
+### Paging, search, sort and filter
+
+The host list is **paged on the server** so that very large fleets load quickly. A fleet of several thousand hosts only ships the current page to the browser, not the whole inventory.
+
+- **Page size** — choose 25, 50 (default), 100 or 200 hosts per page.
+- **Search** — free-text search over hostname, display name, and IP addresses. The input is debounced, so the query only fires when you stop typing.
+- **Status filter** — restrict to Online, Offline, or Unknown.
+- **OS filter** — restrict to any operating system currently present in the inventory. Also wired up to the OS bars in the fleet overview — click a bar to apply the filter.
+- **Sorting** — click any sortable column header (hostname, OS, CPU, memory, disk, last seen, status) to sort ascending; click again to flip to descending. Only one column is sorted at a time. `NULL` values are always pushed to the end so that empty metrics never hide real data.
+
+Page, sort, and filter state all reset sensibly as you adjust them — changing a filter always returns you to the first page of results, and there is a **Clear filters** button to reset everything to the default view.
 
 ---
 
@@ -101,16 +133,6 @@ The host detail page (`/hosts/[id]`) provides a full view of a single host:
 ### Services tab
 - Systemd services on this host
 - Start / stop / restart controls via the agent
-
----
-
-## Filtering and Search
-
-The host list supports filtering by:
-- Status (Online / Offline / Pending)
-- Host group membership
-- OS type
-- Free-text search on hostname
 
 ---
 
