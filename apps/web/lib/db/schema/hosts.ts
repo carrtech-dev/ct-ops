@@ -38,6 +38,12 @@ export const DEFAULT_COLLECTION_SETTINGS: HostCollectionSettings = {
   localUsers: false,
 }
 
+// Operational thresholds shared between host stats queries (server) and the
+// host inventory UI (client). Bumping these means the "hot" resource cards and
+// the SQL filter that counts them stay in agreement.
+export const HOST_HIGH_USAGE_THRESHOLD = 80
+export const HOST_STALE_MINUTES = 15
+
 export interface HostMetadata {
   disks: DiskInfo[]
   network_interfaces: NetworkInterface[]

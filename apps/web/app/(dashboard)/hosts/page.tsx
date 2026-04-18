@@ -1,6 +1,11 @@
 import type { Metadata } from 'next'
 import { getRequiredSession } from '@/lib/auth/session'
-import { listHosts, listPendingAgents } from '@/lib/actions/agents'
+import {
+  listHostsPaginated,
+  listPendingAgents,
+  listDistinctHostOses,
+  getHostInventoryStats,
+} from '@/lib/actions/agents'
 import { HostsClient } from './hosts-client'
 
 export const metadata: Metadata = {
@@ -11,9 +16,11 @@ export default async function HostsPage() {
   const session = await getRequiredSession()
   const orgId = session.user.organisationId!
 
-  const [hostsWithAgents, pendingAgents] = await Promise.all([
-    listHosts(orgId),
+  const [hostPage, pendingAgents, stats, osOptions] = await Promise.all([
+    listHostsPaginated(orgId, { limit: 50, offset: 0, sortBy: 'hostname', sortDir: 'asc' }),
     listPendingAgents(orgId),
+    getHostInventoryStats(orgId),
+    listDistinctHostOses(orgId),
   ])
 
   return (
@@ -21,7 +28,9 @@ export default async function HostsPage() {
       orgId={orgId}
       currentUserId={session.user.id}
       currentUserRole={session.user.role}
-      initialHosts={hostsWithAgents}
+      initialHostPage={hostPage}
+      initialStats={stats}
+      initialOsOptions={osOptions}
       initialPendingAgents={pendingAgents}
     />
   )

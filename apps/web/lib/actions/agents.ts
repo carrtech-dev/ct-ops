@@ -28,9 +28,11 @@ import {
   softwarePackages,
   softwareScans,
 } from '@/lib/db/schema'
-import { eq, and, isNull, gt, gte, lte, asc, sql, inArray } from 'drizzle-orm'
+import { eq, and, isNull, gt, gte, lte, asc, desc, sql, inArray, ilike, or, count } from 'drizzle-orm'
 import type { Agent, AgentEnrolmentToken, Host, HostMetric } from '@/lib/db/schema'
+import { HOST_HIGH_USAGE_THRESHOLD, HOST_STALE_MINUTES } from '@/lib/db/schema/hosts'
 import { applyGlobalDefaultsToHost } from '@/lib/actions/alerts'
+import { escapeLikePattern } from '@/lib/utils'
 import { getOrgDefaultCollectionSettings } from '@/lib/actions/host-settings'
 import { triggerAgentUninstall, getTaskRun } from '@/lib/actions/task-runs'
 import { assignTagsToResource, getOrgDefaultTags, mergeTagLayers } from '@/lib/actions/tags'
@@ -237,6 +239,209 @@ export async function listHosts(orgId: string): Promise<HostWithAgent[]> {
     ...row.hosts,
     agent: row.agents ?? null,
   }))
+}
+
+// ─── Paginated host inventory + stats (hosts page) ───────────────────────────
+//
+// listHosts above returns every host in one shot. It is used by features that
+// genuinely need the whole set (network graph, terminal host picker, bulk-tag,
+// group membership). The main /hosts page instead uses the paginated variant
+// below so that a tenant with thousands of hosts does not ship every row to
+// the browser on first paint.
+
+export type HostSortField =
+  | 'hostname'
+  | 'os'
+  | 'status'
+  | 'cpuPercent'
+  | 'memoryPercent'
+  | 'diskPercent'
+  | 'lastSeenAt'
+
+export type HostSortDir = 'asc' | 'desc'
+
+export interface HostListParams {
+  search?: string
+  status?: 'online' | 'offline' | 'unknown'
+  os?: string
+  sortBy?: HostSortField
+  sortDir?: HostSortDir
+  limit?: number
+  offset?: number
+}
+
+export interface HostListResult {
+  hosts: HostWithAgent[]
+  total: number
+}
+
+const HOST_PAGE_MAX = 200
+
+export async function listHostsPaginated(
+  orgId: string,
+  params: HostListParams = {},
+): Promise<HostListResult> {
+  const limit = Math.max(1, Math.min(params.limit ?? 50, HOST_PAGE_MAX))
+  const offset = Math.max(0, params.offset ?? 0)
+  const sortBy: HostSortField = params.sortBy ?? 'hostname'
+  const sortDir: HostSortDir = params.sortDir ?? 'asc'
+
+  const conditions = [eq(hosts.organisationId, orgId), isNull(hosts.deletedAt)]
+
+  if (params.status) {
+    conditions.push(eq(hosts.status, params.status))
+  }
+  if (params.os) {
+    conditions.push(eq(hosts.os, params.os))
+  }
+  if (params.search && params.search.trim().length > 0) {
+    const pattern = `%${escapeLikePattern(params.search.trim())}%`
+    // Cast the ip_addresses jsonb column to text so an ILIKE pattern still
+    // matches substrings inside the serialised array.
+    const searchClause = or(
+      ilike(hosts.hostname, pattern),
+      ilike(hosts.displayName, pattern),
+      sql`${hosts.ipAddresses}::text ILIKE ${pattern}`,
+    )
+    if (searchClause) conditions.push(searchClause)
+  }
+
+  const columnMap = {
+    hostname: hosts.hostname,
+    os: hosts.os,
+    status: hosts.status,
+    cpuPercent: hosts.cpuPercent,
+    memoryPercent: hosts.memoryPercent,
+    diskPercent: hosts.diskPercent,
+    lastSeenAt: hosts.lastSeenAt,
+  } as const
+  const sortColumn = columnMap[sortBy]
+
+  // Push NULLs to the end regardless of direction — otherwise a DESC sort on a
+  // mostly-empty column (e.g. diskPercent before first scrape) surfaces a wall
+  // of "—" before any real data.
+  const orderExpr =
+    sortDir === 'desc'
+      ? sql`${sortColumn} DESC NULLS LAST`
+      : sql`${sortColumn} ASC NULLS LAST`
+
+  const whereExpr = and(...conditions)
+
+  const [rows, totalRow] = await Promise.all([
+    db
+      .select()
+      .from(hosts)
+      .leftJoin(agents, eq(hosts.agentId, agents.id))
+      .where(whereExpr)
+      .orderBy(orderExpr, asc(hosts.hostname))
+      .limit(limit)
+      .offset(offset),
+    db
+      .select({ c: count() })
+      .from(hosts)
+      .where(whereExpr),
+  ])
+
+  return {
+    hosts: rows.map((row) => ({
+      ...row.hosts,
+      agent: row.agents ?? null,
+    })),
+    total: Number(totalRow[0]?.c ?? 0),
+  }
+}
+
+export interface HostInventoryStats {
+  total: number
+  online: number
+  offline: number
+  unknown: number
+  pending: number
+  staleHosts: number
+  highCpu: number
+  highMemory: number
+  highDisk: number
+  hostsWithFiringAlerts: number
+  osBreakdown: Array<{ os: string; count: number }>
+}
+
+export async function getHostInventoryStats(orgId: string): Promise<HostInventoryStats> {
+  const baseWhere = and(eq(hosts.organisationId, orgId), isNull(hosts.deletedAt))
+  const threshold = HOST_HIGH_USAGE_THRESHOLD
+  const staleCutoff = new Date(Date.now() - HOST_STALE_MINUTES * 60 * 1000)
+
+  const [summary, osRows, pendingRow, alertHostRow] = await Promise.all([
+    db
+      .select({
+        total: count(),
+        online: sql<number>`cast(count(*) filter (where ${hosts.status} = 'online') as int)`,
+        offline: sql<number>`cast(count(*) filter (where ${hosts.status} = 'offline') as int)`,
+        unknown: sql<number>`cast(count(*) filter (where ${hosts.status} NOT IN ('online','offline')) as int)`,
+        highCpu: sql<number>`cast(count(*) filter (where ${hosts.cpuPercent} >= ${threshold}) as int)`,
+        highMemory: sql<number>`cast(count(*) filter (where ${hosts.memoryPercent} >= ${threshold}) as int)`,
+        highDisk: sql<number>`cast(count(*) filter (where ${hosts.diskPercent} >= ${threshold}) as int)`,
+        stale: sql<number>`cast(count(*) filter (where ${hosts.lastSeenAt} IS NULL OR ${hosts.lastSeenAt} < ${staleCutoff.toISOString()}) as int)`,
+      })
+      .from(hosts)
+      .where(baseWhere),
+    db
+      .select({
+        os: hosts.os,
+        c: count(),
+      })
+      .from(hosts)
+      .where(baseWhere)
+      .groupBy(hosts.os)
+      .orderBy(desc(count())),
+    db
+      .select({ c: count() })
+      .from(agents)
+      .where(
+        and(
+          eq(agents.organisationId, orgId),
+          eq(agents.status, 'pending'),
+          isNull(agents.deletedAt),
+        ),
+      ),
+    db
+      .select({
+        c: sql<number>`cast(count(distinct ${alertInstances.hostId}) as int)`,
+      })
+      .from(alertInstances)
+      .where(
+        and(
+          eq(alertInstances.organisationId, orgId),
+          eq(alertInstances.status, 'firing'),
+        ),
+      ),
+  ])
+
+  const row = summary[0]
+  return {
+    total: Number(row?.total ?? 0),
+    online: Number(row?.online ?? 0),
+    offline: Number(row?.offline ?? 0),
+    unknown: Number(row?.unknown ?? 0),
+    pending: Number(pendingRow[0]?.c ?? 0),
+    staleHosts: Number(row?.stale ?? 0),
+    highCpu: Number(row?.highCpu ?? 0),
+    highMemory: Number(row?.highMemory ?? 0),
+    highDisk: Number(row?.highDisk ?? 0),
+    hostsWithFiringAlerts: Number(alertHostRow[0]?.c ?? 0),
+    osBreakdown: osRows.map((r) => ({
+      os: r.os ?? 'Unknown',
+      count: Number(r.c),
+    })),
+  }
+}
+
+export async function listDistinctHostOses(orgId: string): Promise<string[]> {
+  const rows = await db
+    .selectDistinct({ os: hosts.os })
+    .from(hosts)
+    .where(and(eq(hosts.organisationId, orgId), isNull(hosts.deletedAt)))
+    .orderBy(asc(hosts.os))
+  return rows.map((r) => r.os).filter((v): v is string => v !== null && v !== '')
 }
 
 export async function createEnrolmentToken(
