@@ -30,6 +30,29 @@ services:
       retries: 5
 
   # -----------------------------------------------------------------
+  # licence-purchase-db — independent Postgres for apps/licence-purchase.
+  # The purchase app is a separate deployable with its own database;
+  # no TimescaleDB features required here.
+  # Connect string: postgres://infrawatch:infrawatch@localhost:5433/licence_purchase
+  # -----------------------------------------------------------------
+  licence-purchase-db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${LICENCE_PURCHASE_POSTGRES_USER:-infrawatch}
+      POSTGRES_PASSWORD: ${LICENCE_PURCHASE_POSTGRES_PASSWORD:-infrawatch}
+      POSTGRES_DB: ${LICENCE_PURCHASE_POSTGRES_DB:-licence_purchase}
+    volumes:
+      - licence_purchase_db_data:/var/lib/postgresql/data
+    ports:
+      - "${LICENCE_PURCHASE_POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${LICENCE_PURCHASE_POSTGRES_USER:-infrawatch} -d ${LICENCE_PURCHASE_POSTGRES_DB:-licence_purchase}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # -----------------------------------------------------------------
   # Redpanda — message queue (enabled from Phase 1 / Session 3 onwards)
   # Uncomment when the ingest service is introduced.
   # -----------------------------------------------------------------
@@ -60,4 +83,5 @@ services:
 
 volumes:
   db_data:
+  licence_purchase_db_data:
   # redpanda_data:
