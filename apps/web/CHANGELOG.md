@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.52.0](https://github.com/carrtech-dev/ct-ops/compare/web/v0.51.0...web/v0.52.0) (2026-04-18)
+
+
+### Features
+
+* enforce Pro/Enterprise licence gates on certificates, service accounts, and reports ([4c653ba](https://github.com/carrtech-dev/ct-ops/commit/4c653ba8451fac2ec0f37a3950e76d39c19fd2c2))
+* enforce Pro/Enterprise licence gates on certs, service accounts, and reports ([86151d9](https://github.com/carrtech-dev/ct-ops/commit/86151d94f40e4f52675f78388e1b76018dd34fa4))
+
 ## [0.51.0](https://github.com/carrtech-dev/ct-ops/compare/web/v0.50.0...web/v0.51.0) (2026-04-18)
 
 
