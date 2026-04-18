@@ -46,6 +46,28 @@ else
 fi
 echo "Using container runtime: ${COMPOSE[*]}"
 
+# ---- Rootless Podman pre-flight: verify systemd user session ----
+# Rootless Podman networking (netavark + aardvark-dns) requires a D-Bus user
+# socket. Without it, containers start but immediately fail with a cryptic
+# "aardvark-dns failed to start" error. Catch the condition early.
+if [ "${COMPOSE[0]}" != "docker" ] && [ "$(id -u)" != "0" ]; then
+  EXPECTED_RUN_DIR="/run/user/$(id -u)"
+  if [ "${XDG_RUNTIME_DIR:-}" != "$EXPECTED_RUN_DIR" ] || [ ! -S "${XDG_RUNTIME_DIR}/bus" ]; then
+    echo "" >&2
+    echo "ERROR: Rootless Podman requires a systemd user session, but none was found." >&2
+    echo "Run this once on the server (as root), then reconnect your SSH session:" >&2
+    echo "" >&2
+    echo "  sudo loginctl enable-linger $(id -u)" >&2
+    echo "" >&2
+    echo "After reconnecting, verify with:" >&2
+    echo "  echo \$XDG_RUNTIME_DIR    # should print $EXPECTED_RUN_DIR" >&2
+    echo "  ls $EXPECTED_RUN_DIR/bus  # should exist" >&2
+    echo "" >&2
+    echo "Alternatively, run as root: sudo ./start.sh" >&2
+    exit 1
+  fi
+fi
+
 LOCAL=false
 DB_ONLY=false
 DOWN=false
