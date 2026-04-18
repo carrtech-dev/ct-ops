@@ -27,6 +27,60 @@ import (
 // version is injected at build time via -ldflags "-X main.version=<tag>".
 var version = "dev"
 
+// sliceFlag collects repeatable string flags (e.g. "--tag env=prod --tag team=platform").
+type sliceFlag []string
+
+func (s *sliceFlag) String() string { return strings.Join(*s, ",") }
+
+func (s *sliceFlag) Set(v string) error {
+	*s = append(*s, v)
+	return nil
+}
+
+// parseTagPair splits "key=value" or "key:value" into its components. Leading
+// or trailing whitespace is trimmed. Empty keys or values are rejected.
+func parseTagPair(raw string) (string, string, error) {
+	sep := strings.IndexAny(raw, "=:")
+	if sep < 0 {
+		return "", "", fmt.Errorf("tag %q must be key=value or key:value", raw)
+	}
+	k := strings.TrimSpace(raw[:sep])
+	v := strings.TrimSpace(raw[sep+1:])
+	if k == "" || v == "" {
+		return "", "", fmt.Errorf("tag %q has empty key or value", raw)
+	}
+	return k, v, nil
+}
+
+// mergeTags merges config tags and CLI tags, last-wins on key conflict. CLI
+// tags are passed last so the operator's most-specific intent overrides what
+// was baked into the bundle.
+func mergeTags(layers ...[]string) []*agentv1.Tag {
+	byKey := map[string]string{}
+	order := []string{}
+	for _, layer := range layers {
+		for _, raw := range layer {
+			k, v, err := parseTagPair(raw)
+			if err != nil {
+				slog.Warn("ignoring invalid tag", "raw", raw, "err", err)
+				continue
+			}
+			lk := strings.ToLower(k)
+			if _, seen := byKey[lk]; !seen {
+				order = append(order, lk)
+			}
+			byKey[lk] = k + "\x00" + v
+		}
+	}
+	out := make([]*agentv1.Tag, 0, len(order))
+	for _, lk := range order {
+		kv := byKey[lk]
+		parts := strings.SplitN(kv, "\x00", 2)
+		out = append(out, &agentv1.Tag{Key: parts[0], Value: parts[1]})
+	}
+	return out
+}
+
 func main() {
 	configPath := flag.String("config", "/etc/infrawatch/agent.toml", "Path to agent TOML config file")
 	tokenFlag := flag.String("token", "", "Enrolment token (overrides config file and INFRAWATCH_ORG_TOKEN)")
@@ -36,6 +90,8 @@ func main() {
 	tlsSkipVerifyFlag := flag.Bool("tls-skip-verify", false, "Skip TLS certificate verification — use when ingest uses a self-signed cert (insecure)")
 	versionFlag := flag.Bool("version", false, "Print agent version and exit")
 	versionFlagShort := flag.Bool("v", false, "Print agent version and exit (shorthand)")
+	var tagFlags sliceFlag
+	flag.Var(&tagFlags, "tag", "Tag to apply at registration as key=value or key:value (repeatable)")
 	flag.Parse()
 
 	if *versionFlag || *versionFlagShort {
@@ -53,7 +109,7 @@ func main() {
 			slog.Error("--token is required when using --install")
 			os.Exit(1)
 		}
-		if err := install.Run(*tokenFlag, strings.TrimSpace(*addressFlag), *tlsSkipVerifyFlag); err != nil {
+		if err := install.Run(*tokenFlag, strings.TrimSpace(*addressFlag), *tlsSkipVerifyFlag, []string(tagFlags)); err != nil {
 			slog.Error("install failed", "err", err)
 			os.Exit(1)
 		}
@@ -91,11 +147,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	mergedTags := mergeTags(cfg.Agent.Tags, []string(tagFlags))
+
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	if err := runService(ctx, cancel, func(ctx context.Context) error {
-		return runAgent(ctx, cfg)
+		return runAgent(ctx, cfg, mergedTags)
 	}); err != nil && err != context.Canceled {
 		slog.Error("agent error", "err", err)
 		os.Exit(1)
@@ -104,7 +162,7 @@ func main() {
 	slog.Info("agent shutdown complete")
 }
 
-func runAgent(ctx context.Context, cfg *config.Config) error {
+func runAgent(ctx context.Context, cfg *config.Config, tags []*agentv1.Tag) error {
 	keypair, err := identity.LoadOrGenerate(cfg.Agent.DataDir)
 	if err != nil {
 		return err
@@ -137,7 +195,7 @@ func runAgent(ctx context.Context, cfg *config.Config) error {
 				slog.Error("connecting to ingest service", "err", err, "address", cfg.Ingest.Address)
 				return err
 			}
-			registrar := registration.New(agentv1.NewIngestServiceClient(regConn), keypair, cfg.Agent.OrgToken, version)
+			registrar := registration.New(agentv1.NewIngestServiceClient(regConn), keypair, cfg.Agent.OrgToken, version, tags)
 			newState, err := registrar.Register(ctx, state.AgentID)
 			regConn.Close()
 			if err != nil {

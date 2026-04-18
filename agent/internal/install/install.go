@@ -19,14 +19,14 @@ import (
 // It must be called as root (Linux/macOS) or Administrator (Windows).
 // orgToken is required. ingestAddress is optional — pass empty string to keep the existing value.
 // tlsSkipVerify disables TLS certificate verification; use when ingest uses a self-signed cert.
-func Run(orgToken, ingestAddress string, tlsSkipVerify bool) error {
+func Run(orgToken, ingestAddress string, tlsSkipVerify bool, tags []string) error {
 	switch runtime.GOOS {
 	case "linux":
-		return installLinux(orgToken, ingestAddress, tlsSkipVerify)
+		return installLinux(orgToken, ingestAddress, tlsSkipVerify, tags)
 	case "darwin":
-		return installDarwin(orgToken, ingestAddress, tlsSkipVerify)
+		return installDarwin(orgToken, ingestAddress, tlsSkipVerify, tags)
 	case "windows":
-		return installWindows(orgToken, ingestAddress, tlsSkipVerify)
+		return installWindows(orgToken, ingestAddress, tlsSkipVerify, tags)
 	default:
 		return fmt.Errorf("unsupported OS: %s", runtime.GOOS)
 	}
@@ -36,7 +36,7 @@ func Run(orgToken, ingestAddress string, tlsSkipVerify bool) error {
 // any explicitly provided flag values on top. This preserves fields like
 // ca_cert_file and tls_skip_verify across reinstalls.
 // orgToken is always applied. ingestAddress and tlsSkipVerify are only applied if non-zero.
-func mergeConfig(cfgPath, orgToken, ingestAddress, defaultDataDir string, tlsSkipVerify bool) *agentconfig.Config {
+func mergeConfig(cfgPath, orgToken, ingestAddress, defaultDataDir string, tlsSkipVerify bool, tags []string) *agentconfig.Config {
 	cfg, err := agentconfig.Load(cfgPath)
 	if err != nil {
 		// File missing or unparseable — start from scratch with caller-supplied defaults.
@@ -60,6 +60,9 @@ func mergeConfig(cfgPath, orgToken, ingestAddress, defaultDataDir string, tlsSki
 	}
 	if tlsSkipVerify {
 		cfg.Ingest.TLSSkipVerify = true
+	}
+	if len(tags) > 0 {
+		cfg.Agent.Tags = tags
 	}
 
 	return cfg
@@ -85,7 +88,7 @@ func backupConfig(cfgPath string) {
 
 // ── Linux / systemd ───────────────────────────────────────────────────────────
 
-func installLinux(orgToken, ingestAddress string, tlsSkipVerify bool) error {
+func installLinux(orgToken, ingestAddress string, tlsSkipVerify bool, tags []string) error {
 	if os.Getuid() != 0 {
 		return fmt.Errorf("install must be run as root (try: sudo ./infrawatch-agent --install ...)")
 	}
@@ -100,7 +103,7 @@ func installLinux(orgToken, ingestAddress string, tlsSkipVerify bool) error {
 	if err := mkdirs("/etc/infrawatch", dataDir); err != nil {
 		return fmt.Errorf("creating directories: %w", err)
 	}
-	cfg := mergeConfig(cfgPath, orgToken, ingestAddress, dataDir, tlsSkipVerify)
+	cfg := mergeConfig(cfgPath, orgToken, ingestAddress, dataDir, tlsSkipVerify, tags)
 	if err := writeConfig(cfgPath, cfg); err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}
@@ -142,7 +145,7 @@ WantedBy=multi-user.target
 
 // ── macOS / launchd ───────────────────────────────────────────────────────────
 
-func installDarwin(orgToken, ingestAddress string, tlsSkipVerify bool) error {
+func installDarwin(orgToken, ingestAddress string, tlsSkipVerify bool, tags []string) error {
 	if os.Getuid() != 0 {
 		return fmt.Errorf("install must be run as root (try: sudo ./infrawatch-agent --install ...)")
 	}
@@ -158,7 +161,7 @@ func installDarwin(orgToken, ingestAddress string, tlsSkipVerify bool) error {
 	if err := mkdirs("/etc/infrawatch", dataDir, "/var/log"); err != nil {
 		return fmt.Errorf("creating directories: %w", err)
 	}
-	cfg := mergeConfig(cfgPath, orgToken, ingestAddress, dataDir, tlsSkipVerify)
+	cfg := mergeConfig(cfgPath, orgToken, ingestAddress, dataDir, tlsSkipVerify, tags)
 	if err := writeConfig(cfgPath, cfg); err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}
@@ -204,7 +207,7 @@ func installDarwin(orgToken, ingestAddress string, tlsSkipVerify bool) error {
 
 // ── Windows / Service Control Manager ────────────────────────────────────────
 
-func installWindows(orgToken, ingestAddress string, tlsSkipVerify bool) error {
+func installWindows(orgToken, ingestAddress string, tlsSkipVerify bool, tags []string) error {
 	if !isAdmin() {
 		return fmt.Errorf("install must be run as Administrator")
 	}
@@ -221,7 +224,7 @@ func installWindows(orgToken, ingestAddress string, tlsSkipVerify bool) error {
 	if err := copyBinary(dest); err != nil {
 		return fmt.Errorf("copying binary: %w", err)
 	}
-	cfg := mergeConfig(cfgFile, orgToken, ingestAddress, dataDir, tlsSkipVerify)
+	cfg := mergeConfig(cfgFile, orgToken, ingestAddress, dataDir, tlsSkipVerify, tags)
 	if err := writeConfig(cfgFile, cfg); err != nil {
 		return fmt.Errorf("writing config: %w", err)
 	}
@@ -318,6 +321,13 @@ func writeConfig(path string, cfg *agentconfig.Config) error {
 	b.WriteString(fmt.Sprintf("data_dir   = %q\n", cfg.Agent.DataDir))
 	if cfg.Agent.HeartbeatIntervalSecs > 0 && cfg.Agent.HeartbeatIntervalSecs != 30 {
 		b.WriteString(fmt.Sprintf("heartbeat_interval_secs = %d\n", cfg.Agent.HeartbeatIntervalSecs))
+	}
+	if len(cfg.Agent.Tags) > 0 {
+		parts := make([]string, 0, len(cfg.Agent.Tags))
+		for _, t := range cfg.Agent.Tags {
+			parts = append(parts, fmt.Sprintf("%q", t))
+		}
+		b.WriteString(fmt.Sprintf("tags = [%s]\n", strings.Join(parts, ", ")))
 	}
 
 	if err := writeFile(path, b.String(), 0o600); err != nil {

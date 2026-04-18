@@ -85,7 +85,7 @@ func (v *VirtualAgent) Register(ctx context.Context) (status string, err error) 
 	}
 	client := agentv1.NewIngestServiceClient(conn)
 
-	reg := registration.New(client, v.keypair, v.cfg.OrgToken, agentVersion)
+	reg := registration.New(client, v.keypair, v.cfg.OrgToken, agentVersion, nil)
 	reg.SetHostnameOverride(v.hostname)
 	// Empty IP list — critical for the load tester so the server's hostname/IP
 	// collision check does not adopt an existing host onto this virtual agent's

@@ -98,6 +98,19 @@ func (h *RegisterHandler) Register(ctx context.Context, req *agentv1.RegisterReq
 		agentArch = req.PlatformInfo.Arch
 	}
 
+	// Merge tags from the enrolment token metadata (bundle-baked) with tags
+	// sent in the request (config + CLI, already merged agent-side). Request
+	// tags win on conflicting keys because a CLI --tag is more specific to
+	// this physical machine than what the operator baked into the bundle.
+	reqTagPairs := make([]queries.TagPair, 0, len(req.Tags))
+	for _, t := range req.Tags {
+		if t == nil || t.Key == "" || t.Value == "" {
+			continue
+		}
+		reqTagPairs = append(reqTagPairs, queries.TagPair{Key: t.Key, Value: t.Value})
+	}
+	mergedTags := queries.MergeTagLayers(token.Metadata.Tags, reqTagPairs)
+
 	// Step 3: Check for identity collision with an existing host in the org.
 	// Hostname or IP overlap indicates the same physical machine — either
 	// actively duplicating (reject) or re-registering after a data-dir wipe
@@ -192,8 +205,15 @@ func (h *RegisterHandler) Register(ctx context.Context, req *agentv1.RegisterReq
 		slog.Warn("incrementing enrolment token usage", "err", err)
 	}
 
-	// Insert host row
-	if _, err := queries.InsertHost(ctx, h.pool, orgID, agentID, hostname, agentOS, agentArch); err != nil {
+	// Insert host row. When the token is NOT auto-approve, stash the merged
+	// tags into metadata.pendingTags so approveAgent (TS) can drain them. On
+	// auto-approve we apply tags directly below and pass nil here.
+	var pendingForInsert []queries.TagPair
+	if !token.AutoApprove {
+		pendingForInsert = mergedTags
+	}
+	hostID, err := queries.InsertHost(ctx, h.pool, orgID, agentID, hostname, agentOS, agentArch, pendingForInsert)
+	if err != nil {
 		slog.Warn("inserting host row", "err", err)
 	}
 
@@ -212,6 +232,23 @@ func (h *RegisterHandler) Register(ctx context.Context, req *agentv1.RegisterReq
 		}
 		if err := queries.InsertAgentStatusHistory(ctx, h.pool, agentID, orgID, "active", nil, "auto-approved by enrolment token"); err != nil {
 			slog.Warn("inserting auto-approve history", "err", err)
+		}
+
+		// Apply merged tag layers (org defaults → token → request) to the host
+		// row. There is no TS approval step in the auto-approve path, so tags
+		// must be written here. Saved tag_rules are evaluated later in TS by
+		// a cron/backfill job since they may depend on non-registration state.
+		if hostID != "" {
+			defaults, err := queries.GetOrgDefaultTags(ctx, h.pool, orgID)
+			if err != nil {
+				slog.Warn("loading org default tags", "err", err)
+			}
+			finalTags := queries.MergeTagLayers(defaults, mergedTags)
+			if len(finalTags) > 0 {
+				if err := queries.AssignTagsToResource(ctx, h.pool, orgID, "host", hostID, finalTags); err != nil {
+					slog.Warn("applying tags on auto-approve", "err", err)
+				}
+			}
 		}
 
 		jwtToken, err := h.issuer.IssueAgentToken(agentID, orgID)

@@ -29,7 +29,12 @@ Bundle generation is gated to **`super_admin`** and **`org_admin`** roles. Every
    - **Embed an existing token**. Pick one of your active tokens — useful when you have a long-lived token shared across a rollout batch.
    - **No token**. The bundle ships without a token. The operator exports `INFRAWATCH_ORG_TOKEN` on the target host before running the install script.
 6. Optionally override the **ingest address** (defaults to `<this-server>:9443`).
-7. Click **Download**. The browser downloads `infrawatch-agent-<os>-<arch>.zip`.
+7. Optionally add **tags** as `key:value` pairs. These are baked into
+   `agent.toml` and passed as `--tag` flags by the install script, so every
+   host installed from the bundle registers with those tags. See
+   [Tags](../features/tags.md) for how tags are merged with org defaults and
+   CLI flags.
+8. Click **Download**. The browser downloads `infrawatch-agent-<os>-<arch>.zip`.
 
 > **Heads up — token sensitivity.** When a token is embedded, treat the zip as sensitive: anyone with the file can register an agent against your organisation until the token is used, expired, or revoked. Single-use + short-expiry defaults limit the blast radius if the file leaks.
 

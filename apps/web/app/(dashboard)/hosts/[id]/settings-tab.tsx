@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Settings, Users, Cpu, HardDrive, MemoryStick, Plus, X, TerminalSquare } from 'lucide-react'
+import { Settings, Users, Cpu, HardDrive, MemoryStick, Plus, X, TerminalSquare, Tag as TagIcon } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Switch } from '@/components/ui/switch'
 import { Label } from '@/components/ui/label'
@@ -13,7 +13,9 @@ import { getHostCollectionSettings, updateHostCollectionSettings } from '@/lib/a
 import { getHostTerminalSettings, updateHostTerminalSettings } from '@/lib/actions/terminal'
 import type { HostTerminalSettings } from '@/lib/actions/terminal'
 import { getOrgUsers } from '@/lib/actions/users'
+import { listResourceTags, replaceResourceTags } from '@/lib/actions/tags'
 import type { HostCollectionSettings } from '@/lib/db/schema'
+import { TagEditor, type EditorTag } from '@/components/shared/tag-editor'
 
 interface SettingsTabProps {
   orgId: string
@@ -79,6 +81,34 @@ export function SettingsTab({ orgId, hostId, isAdmin }: SettingsTabProps) {
       terminalAllowedUsers: (currentTerminalSettings.terminalAllowedUsers ?? []).filter((id) => id !== userId),
     })
   }
+
+  // Tags state
+  const [tagSaveSuccess, setTagSaveSuccess] = useState(false)
+  const [localTags, setLocalTags] = useState<EditorTag[] | null>(null)
+
+  const { data: hostTags } = useQuery({
+    queryKey: ['host-tags', orgId, hostId],
+    queryFn: () => listResourceTags(orgId, 'host', hostId),
+  })
+  const currentTags: EditorTag[] =
+    localTags ?? (hostTags ?? []).map((t) => ({ id: t.resourceTagId, key: t.key, value: t.value }))
+
+  const tagMutation = useMutation({
+    mutationFn: (pairs: EditorTag[]) =>
+      replaceResourceTags(
+        orgId,
+        'host',
+        hostId,
+        pairs.map((t) => ({ key: t.key, value: t.value })),
+      ),
+    onSuccess: (result) => {
+      if ('error' in result) return
+      setTagSaveSuccess(true)
+      setLocalTags(null)
+      queryClient.invalidateQueries({ queryKey: ['host-tags', orgId, hostId] })
+      setTimeout(() => setTagSaveSuccess(false), 3000)
+    },
+  })
 
   const [localSettings, setLocalSettings] = useState<HostCollectionSettings | null>(null)
 
@@ -331,6 +361,48 @@ export function SettingsTab({ orgId, hostId, isAdmin }: SettingsTabProps) {
               <span className="text-sm text-destructive">Failed to save settings</span>
             )}
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Tags Card */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <TagIcon className="size-4 text-muted-foreground" />
+            Tags
+          </CardTitle>
+          <CardDescription>
+            Tags group hosts for filtering, alerting and bulk operations. Start typing to pick
+            from existing tags — this keeps naming consistent across the fleet.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <TagEditor
+            orgId={orgId}
+            value={currentTags}
+            onChange={setLocalTags}
+            disabled={!isAdmin}
+          />
+          {isAdmin && (
+            <div className="mt-4 flex items-center gap-3 border-t pt-4">
+              <Button
+                size="sm"
+                disabled={localTags === null || tagMutation.isPending}
+                onClick={() => tagMutation.mutate(currentTags)}
+              >
+                {tagMutation.isPending ? 'Saving...' : 'Save'}
+              </Button>
+              {tagSaveSuccess && (
+                <span className="flex items-center gap-1 text-sm text-green-700">
+                  <CheckCircle2 className="size-4" />
+                  Saved
+                </span>
+              )}
+              {tagMutation.isError && (
+                <span className="text-sm text-destructive">Failed to save tags</span>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 

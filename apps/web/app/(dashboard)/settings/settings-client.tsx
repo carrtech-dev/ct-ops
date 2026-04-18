@@ -10,7 +10,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { CheckCircle2, XCircle, Info, Database, Cpu, HardDrive, MemoryStick, Users, TerminalSquare, ScrollText, ShieldAlert, Bell, ScanLine } from 'lucide-react'
+import { CheckCircle2, XCircle, Info, Database, Cpu, HardDrive, MemoryStick, Users, TerminalSquare, ScrollText, ShieldAlert, Bell, ScanLine, Tag as TagIcon } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -19,6 +19,9 @@ import { getOrgDefaultCollectionSettings, updateOrgDefaultCollectionSettings } f
 import { getOrgTerminalSettings, updateOrgTerminalSettings } from '@/lib/actions/terminal'
 import { getOrgNotificationSettings, updateOrgNotificationSettings } from '@/lib/actions/notification-settings'
 import { getSoftwareInventorySettings, updateSoftwareInventorySettings } from '@/lib/actions/software-inventory'
+import { getOrgDefaultTags, updateOrgDefaultTags } from '@/lib/actions/tags'
+import { TagEditor, type EditorTag } from '@/components/shared/tag-editor'
+import type { TagPair } from '@/lib/db/schema'
 import type { OrgTerminalSettings } from '@/lib/actions/terminal'
 import type { OrgNotificationSettingsFull } from '@/lib/actions/notification-settings'
 import type { Organisation, HostCollectionSettings, SoftwareInventorySettings } from '@/lib/db/schema'
@@ -143,6 +146,28 @@ export function SettingsClient({ org, isAdmin }: SettingsClientProps) {
       setCollectionSaveSuccess(true)
       queryClient.invalidateQueries({ queryKey: ['org-collection-defaults', org.id] })
       setTimeout(() => setCollectionSaveSuccess(false), 3000)
+    },
+  })
+
+  // Default tags
+  const [tagsSaveSuccess, setTagsSaveSuccess] = useState(false)
+  const { data: defaultTags } = useQuery({
+    queryKey: ['org-default-tags', org.id],
+    queryFn: () => getOrgDefaultTags(org.id),
+  })
+  const [localDefaultTags, setLocalDefaultTags] = useState<EditorTag[] | null>(null)
+  const currentDefaultTags: EditorTag[] =
+    localDefaultTags ?? (defaultTags ?? []).map((t) => ({ key: t.key, value: t.value }))
+  const tagsDirty = localDefaultTags !== null
+
+  const tagsMutation = useMutation({
+    mutationFn: (pairs: TagPair[]) => updateOrgDefaultTags(org.id, pairs),
+    onSuccess: (result) => {
+      if ('error' in result) return
+      setLocalDefaultTags(null)
+      setTagsSaveSuccess(true)
+      queryClient.invalidateQueries({ queryKey: ['org-default-tags', org.id] })
+      setTimeout(() => setTagsSaveSuccess(false), 3000)
     },
   })
 
@@ -417,6 +442,49 @@ export function SettingsClient({ org, isAdmin }: SettingsClientProps) {
               <p>Memory: {currentCollectionSettings.memory ? 'Enabled' : 'Disabled'}</p>
               <p>Disk: {currentCollectionSettings.disk ? 'Enabled' : 'Disabled'}</p>
               <p>Local Users: {currentCollectionSettings.localUsers ? 'Enabled' : 'Disabled'}</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Default Tags section */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <TagIcon className="size-4 text-muted-foreground" />
+            Default Tags
+          </CardTitle>
+          <CardDescription>
+            Applied automatically to every newly approved host. Tags set per-host, on an enrolment
+            token, or on the agent CLI override these defaults on matching keys.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <TagEditor
+            orgId={org.id}
+            value={currentDefaultTags}
+            onChange={(next) => setLocalDefaultTags(next)}
+            disabled={!isAdmin}
+          />
+          {isAdmin && (
+            <div className="flex items-center gap-3 pt-2 border-t">
+              <Button
+                size="sm"
+                disabled={!tagsDirty || tagsMutation.isPending}
+                onClick={() =>
+                  tagsMutation.mutate(
+                    currentDefaultTags.map((t) => ({ key: t.key, value: t.value })),
+                  )
+                }
+              >
+                {tagsMutation.isPending ? 'Saving...' : 'Save'}
+              </Button>
+              {tagsSaveSuccess && (
+                <span className="flex items-center gap-1 text-sm text-green-700">
+                  <CheckCircle2 className="size-4" />
+                  Saved
+                </span>
+              )}
             </div>
           )}
         </CardContent>

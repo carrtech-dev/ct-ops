@@ -45,6 +45,10 @@ export interface HostMetadata {
   terminalEnabled?: boolean
   terminalAllowedUsers?: string[]
   lastSoftwareScanAt?: string    // ISO timestamp; avoid Date in JSONB (use .toISOString())
+  // Tags supplied via the agent CLI --tag flag / token metadata at register
+  // time. Stashed here until approveAgent merges them with org defaults and
+  // writes canonical rows into resource_tags.
+  pendingTags?: Array<{ key: string; value: string }>
 }
 
 export const hosts = pgTable('hosts', {

@@ -17,6 +17,7 @@ export interface SoftwareInventorySettings {
 
 export interface OrgMetadata {
   defaultCollectionSettings?: HostCollectionSettings
+  defaultTags?: Array<{ key: string; value: string }>
   terminalEnabled?: boolean
   terminalLoggingEnabled?: boolean
   terminalDirectAccess?: boolean
