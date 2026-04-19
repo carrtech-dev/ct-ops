@@ -45,6 +45,17 @@ export async function POST(req: NextRequest): Promise<Response> {
     console.error('[stripe webhook] failed to persist event', err)
   }
 
+  // Idempotency: if this event has already been processed (Stripe retries on
+  // transient network errors), skip the handler. Event row always exists here
+  // because the insert above either created it or the onConflictDoNothing kept
+  // the existing row in place.
+  const existingEvent = await db.query.stripeWebhookEvents.findFirst({
+    where: eq(stripeWebhookEvents.id, event.id),
+  })
+  if (existingEvent?.processed) {
+    return new Response('ok', { status: 200 })
+  }
+
   try {
     await handleStripeEvent(event)
     await db
