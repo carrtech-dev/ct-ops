@@ -7,6 +7,7 @@ import { eq, and, isNull, asc, desc, sql } from 'drizzle-orm'
 import type { Certificate, CertificateEvent, CertificateStatus, CertificateDetails } from '@/lib/db/schema'
 import { getRequiredSession } from '@/lib/auth/session'
 import { requireFeature } from '@/lib/actions/licence-guard'
+import { escapeLikePattern } from '@/lib/utils'
 import { computeExpiryStatus } from '@/lib/certificates/expiry'
 import {
   fetchCertificateFromUrl,
@@ -52,7 +53,9 @@ export async function getCertificates(
     eq(certificates.organisationId, orgId),
     isNull(certificates.deletedAt),
     ...(status != null ? [eq(certificates.status, status)] : []),
-    ...(host != null && host !== '' ? [sql`${certificates.host} ILIKE ${'%' + host + '%'}`] : []),
+    ...(host != null && host !== ''
+      ? [sql`${certificates.host} ILIKE ${`%${escapeLikePattern(host)}%`}`]
+      : []),
   ]
 
   const orderCol =

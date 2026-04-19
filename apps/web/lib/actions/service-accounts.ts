@@ -12,6 +12,7 @@ import type {
 } from '@/lib/db/schema'
 import type { Host } from '@/lib/db/schema'
 import { requireFeature } from '@/lib/actions/licence-guard'
+import { escapeLikePattern } from '@/lib/utils'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -65,7 +66,7 @@ export async function getServiceAccounts(
     ...(status != null ? [eq(serviceAccounts.status, status)] : []),
     ...(hostId != null && hostId !== '' ? [eq(serviceAccounts.hostId, hostId)] : []),
     ...(search != null && search !== ''
-      ? [sql`${serviceAccounts.username} ILIKE ${'%' + search + '%'}`]
+      ? [sql`${serviceAccounts.username} ILIKE ${`%${escapeLikePattern(search)}%`}`]
       : []),
   ]
 

@@ -3,9 +3,10 @@
 import { z } from 'zod'
 import { db } from '@/lib/db'
 import { domainAccounts } from '@/lib/db/schema'
-import { eq, and, asc, desc, sql } from 'drizzle-orm'
+import { eq, and, isNull, asc, desc, sql } from 'drizzle-orm'
 import type { DomainAccount, DomainAccountStatus } from '@/lib/db/schema'
 import { requireFeature } from '@/lib/actions/licence-guard'
+import { escapeLikePattern } from '@/lib/utils'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -60,9 +61,10 @@ export async function getDomainAccounts(
 
   const conditions = [
     eq(domainAccounts.organisationId, orgId),
+    isNull(domainAccounts.deletedAt),
     ...(status != null ? [eq(domainAccounts.status, status)] : []),
     ...(search != null && search !== ''
-      ? [sql`(${domainAccounts.username} ILIKE ${'%' + search + '%'} OR ${domainAccounts.displayName} ILIKE ${'%' + search + '%'})`]
+      ? [sql`(${domainAccounts.username} ILIKE ${`%${escapeLikePattern(search)}%`} OR ${domainAccounts.displayName} ILIKE ${`%${escapeLikePattern(search)}%`})`]
       : []),
   ]
 
@@ -92,6 +94,7 @@ export async function getDomainAccount(
     where: and(
       eq(domainAccounts.id, accountId),
       eq(domainAccounts.organisationId, orgId),
+      isNull(domainAccounts.deletedAt),
     ),
   })
   return result ?? null
@@ -107,7 +110,7 @@ export async function getDomainAccountCounts(
       count: sql<number>`cast(count(*) as int)`,
     })
     .from(domainAccounts)
-    .where(eq(domainAccounts.organisationId, orgId))
+    .where(and(eq(domainAccounts.organisationId, orgId), isNull(domainAccounts.deletedAt)))
     .groupBy(domainAccounts.status)
 
   const counts: DomainAccountCounts = {
@@ -182,6 +185,7 @@ export async function updateDomainAccount(
     where: and(
       eq(domainAccounts.id, accountId),
       eq(domainAccounts.organisationId, orgId),
+      isNull(domainAccounts.deletedAt),
     ),
   })
   if (!existing) return { error: 'Account not found' }
@@ -213,12 +217,14 @@ export async function deleteDomainAccount(
     where: and(
       eq(domainAccounts.id, accountId),
       eq(domainAccounts.organisationId, orgId),
+      isNull(domainAccounts.deletedAt),
     ),
   })
   if (!existing) return { error: 'Account not found' }
 
   await db
-    .delete(domainAccounts)
+    .update(domainAccounts)
+    .set({ deletedAt: new Date(), updatedAt: new Date() })
     .where(and(eq(domainAccounts.id, accountId), eq(domainAccounts.organisationId, orgId)))
 
   return { success: true }
