@@ -2,7 +2,7 @@
 # Multi-stage build: Node.js build → nginx static serve
 # Build context must be the monorepo root.
 
-FROM node:20-alpine AS base
+FROM node:25-alpine AS base
 RUN corepack enable && corepack prepare pnpm@latest --activate
 
 # ------------------------------------------------------------------
