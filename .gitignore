@@ -48,5 +48,9 @@ apps/web/data/agent-dist/infrawatch-agent-*
 # Dev ingest data — contains generated JWT private key, never commit
 deploy/dev-ingest-data/
 
+# Licence signing private key — generated locally, never commit
+deploy/scripts/licence-dev-private.pem
+deploy/scripts/licence-*-private.pem
+
 # Claude Code local config
 .claude/
