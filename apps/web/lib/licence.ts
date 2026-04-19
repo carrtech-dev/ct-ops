@@ -5,13 +5,13 @@ import type { Feature, LicenceTier } from './features'
 // In production, set LICENCE_PUBLIC_KEY to your RSA public key PEM.
 // The matching private key lives in deploy/scripts/licence-dev-private.pem (never commit).
 const DEV_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
-MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA5Wep87Fxy2SUYnx8MLx2
-oVWA94ygeDMKfRQWm16Vdvc+fzpTQettcbMQN6AMe/SzFk0oipzs2wB//9DyoFhK
-Aj2C2rsmuRlgFv8hcdHrfFKRw416pJTzmMNeu+Qc+shXw76lvOjnFRkEc/KKchcX
-CdPM3h3rYVbjBpZEkgbbxqRnG9wbBF4/eEtQthkEilIPYf3O+zWaUxwpMyLuykr7
-OcVgn3vrZ0RfExrMhelwZvgDoutHol9KhoqCQkSLxaL2eMC9NzYtCuESLCYOEiIS
-q6YFpCA6PtWXuwKYMfj9egw/d2KePf5YiBEBZJzLu1L57Fouf1fVWc7hr32BrL9N
-wQIDAQAB
+MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAz/pW3tGLo8e//f75eVk3
+pNM/S9CPBYozjgSRDxppJQIr2JPTI4tM9jd4Of1i0/MYfighpTSilDtUGgI6Q6Z9
+8hs5aBFT/N63BanMwsAlqGHRZ/igJSWu5HhBuWR2CtKIpIqGcel32uAyGDnTjfKu
+iYswa0tn+/Q2KxX7HF6aoNAH0CH333sa88QxNCRCKvj/Byqqdma/VTp7Gj50JdSP
+YvAIzi0rDcPBMRFMGm6M7n6lwN/XCPgdXEAzI2z+/PiBAK3suh3jyaxtD0D4FHdt
+/Iyxxs/zZsceZIpjDcyVbd1JJ6Y3DumbgAPqajnMNSVkniYWG7Q37DfsYNtk6/DT
+EQIDAQAB
 -----END PUBLIC KEY-----`
 
 /**
