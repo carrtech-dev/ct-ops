@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.59.0](https://github.com/carrtech-dev/ct-ops/compare/web/v0.58.0...web/v0.59.0) (2026-04-19)
+
+
+### Features
+
+* **notes:** host detail integration (PR 3) ([e876237](https://github.com/carrtech-dev/ct-ops/commit/e876237b1e06452190596cf0174af95b34ffea6e))
+* **notes:** host detail integration (PR 3) ([f1b3b9a](https://github.com/carrtech-dev/ct-ops/commit/f1b3b9a0921cfe3082a28e56a233b811453a8bb1))
+
 ## [0.58.0](https://github.com/carrtech-dev/ct-ops/compare/web/v0.57.1...web/v0.58.0) (2026-04-19)
 
 
