@@ -10,6 +10,10 @@ export async function register() {
   // Only run in the Node.js runtime (not Edge), and only on the server.
   if (process.env.NEXT_RUNTIME !== 'nodejs') return
 
+  // `next build` sets NODE_ENV=production but secrets are not available at
+  // build time. Skip runtime-only checks during the build phase.
+  if (process.env.NEXT_PHASE === 'phase-production-build') return
+
   // Validate licence public key configuration — throws in production if missing
   // or set to the development key, preventing forged licence acceptance.
   const { resolveLicencePublicKeyPem } = await import('./lib/licence')

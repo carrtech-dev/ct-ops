@@ -36,7 +36,8 @@ jobs:
         env:
           # Dummy env vars so Next.js build doesn't fail on missing secrets
           DATABASE_URL: postgresql://dummy:dummy@localhost:5432/dummy
-          BETTER_AUTH_SECRET: dummy-secret-for-ci-build-only
+          BETTER_AUTH_SECRET: dummy-secret-for-ci-build-only-at-least-32
+          BETTER_AUTH_URL: http://localhost:3000
           NEXT_PUBLIC_APP_URL: http://localhost:3000
 
   go:
