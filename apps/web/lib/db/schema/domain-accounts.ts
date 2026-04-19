@@ -16,6 +16,7 @@ export const domainAccounts = pgTable('domain_accounts', {
   passwordExpiresAt: timestamp('password_expires_at', { withTimezone: true }),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
   metadata: jsonb('metadata'),
 }, (t) => [
   uniqueIndex('domain_accounts_org_username_idx').on(t.organisationId, t.username),

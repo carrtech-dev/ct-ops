@@ -1,5 +1,6 @@
 import { pgTable, text, timestamp, jsonb } from 'drizzle-orm/pg-core'
 import { createId } from '@paralleldrive/cuid2'
+import { randomBytes } from 'crypto'
 import { organisations } from './organisations'
 import { users } from './auth'
 
@@ -7,7 +8,8 @@ export const invitations = pgTable('invitations', {
   id: text('id').primaryKey().$defaultFn(() => createId()),
   email: text('email').notNull(),
   role: text('role').notNull().default('engineer'),
-  token: text('token').notNull().unique().$defaultFn(() => createId()),
+  // 256-bit cryptographically random token — safe for use as a bearer secret.
+  token: text('token').notNull().unique().$defaultFn(() => randomBytes(32).toString('hex')),
   organisationId: text('organisation_id')
     .notNull()
     .references(() => organisations.id),
