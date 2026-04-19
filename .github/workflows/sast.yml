@@ -34,10 +34,14 @@ jobs:
           go-version: "1.25"
           cache-dependency-path: ${{ matrix.path }}/go.sum
 
+      - name: Install gosec
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/securego/gosec/master/install.sh \
+            | sh -s -- -b "$HOME/.local/bin" v2.22.0
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
       - name: Run gosec
-        uses: securego/gosec@master
-        with:
-          args: "-no-fail -fmt sarif -out results.sarif ./..."
+        run: gosec -no-fail -fmt sarif -out results.sarif ./...
         env:
           GOFLAGS: "-buildvcs=false"
         working-directory: ${{ matrix.path }}
