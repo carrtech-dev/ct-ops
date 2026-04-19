@@ -44,7 +44,7 @@ export async function updateOrgNotificationSettings(
 ): Promise<{ success: true } | { error: string }> {
   const session = await getRequiredSession()
 
-  if (!ADMIN_ROLES.includes(session.user.role as (typeof ADMIN_ROLES)[number])) {
+  if (!ADMIN_ROLES.includes(session.user.role)) {
     return { error: 'You do not have permission to update notification settings' }
   }
 

@@ -1,8 +1,6 @@
-export const ADMIN_ROLES = ['org_admin', 'super_admin'] as const
+export type AdminRole = 'org_admin' | 'super_admin'
+export type MembershipRole = 'org_admin' | 'super_admin' | 'engineer'
 
-export const MEMBERSHIP_ROLES = ['org_admin', 'super_admin', 'engineer'] as const
-
-export const DEFAULT_NOTIFICATION_ROLES = ['super_admin', 'org_admin', 'engineer'] as const
-
-export type AdminRole = (typeof ADMIN_ROLES)[number]
-export type MembershipRole = (typeof MEMBERSHIP_ROLES)[number]
+export const ADMIN_ROLES: string[] = ['org_admin', 'super_admin']
+export const MEMBERSHIP_ROLES: string[] = ['org_admin', 'super_admin', 'engineer']
+export const DEFAULT_NOTIFICATION_ROLES: string[] = ['super_admin', 'org_admin', 'engineer']
