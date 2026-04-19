@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.57.1](https://github.com/carrtech-dev/ct-ops/compare/web/v0.57.0...web/v0.57.1) (2026-04-19)
+
+
+### Bug Fixes
+
+* **licence:** align issuer and audience across sign and verify paths ([314c1c9](https://github.com/carrtech-dev/ct-ops/commit/314c1c98725a1a79a5c6aee9ce0fafeb7b50ef10))
+* **licence:** align issuer/audience between sign and verify ([43bf32c](https://github.com/carrtech-dev/ct-ops/commit/43bf32c8b0146473abd09db15cbda06f15139208))
+
 ## [0.57.0](https://github.com/carrtech-dev/ct-ops/compare/web/v0.56.0...web/v0.57.0) (2026-04-19)
 
 
