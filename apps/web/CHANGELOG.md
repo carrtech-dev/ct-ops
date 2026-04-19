@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.59.1](https://github.com/carrtech-dev/ct-ops/compare/web/v0.59.0...web/v0.59.1) (2026-04-19)
+
+
+### Bug Fixes
+
+* **notes:** visibility toggle label wraps and overlaps tabs ([6e7ef1c](https://github.com/carrtech-dev/ct-ops/commit/6e7ef1c7c630ed0facac6dd0e11c6447a7887e11))
+
 ## [0.59.0](https://github.com/carrtech-dev/ct-ops/compare/web/v0.58.0...web/v0.59.0) (2026-04-19)
 
 
