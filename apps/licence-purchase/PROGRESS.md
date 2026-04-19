@@ -37,33 +37,30 @@ Related references:
 
 ## Phase 1 — Stripe wiring
 
-- [ ] Implement `lib/stripe/create-checkout-session.ts`:
-  - `card` / `bacs_debit` → `stripe.checkout.sessions.create({ mode: 'subscription', payment_method_types, line_items: [{ price, quantity: seatCount }], customer_email, success_url, cancel_url, automatic_tax: { enabled: env.stripeTaxEnabled }, subscription_data: { metadata } })`
-  - `invoice` → `stripe.subscriptions.create({ collection_method: 'send_invoice', days_until_due: env.stripeInvoiceCollectionDays, ... })` then return the hosted invoice URL.
-- [ ] Implement `lib/stripe/handle-webhook.ts` cases:
-  - `checkout.session.completed` → create / update `purchase` row, link `organisations.stripeCustomerId`.
-  - `invoice.paid` → upsert `invoice`, trigger Phase 2 licence issuance, send receipt email.
-  - `invoice.payment_failed` → mark `purchase.status = 'past_due'`, notify billing contact.
-  - `customer.subscription.updated` → reflect period / status changes.
-  - `customer.subscription.deleted` → mark `purchase.status = 'canceled'`; existing licence keeps working until `exp`.
-- [ ] Implement `lib/stripe/customer-portal.ts` via `stripe.billingPortal.sessions.create(...)` and wire it to a button on `/account`.
-- [ ] Create Stripe products + prices (Pro monthly/annual, Enterprise monthly/annual) and paste the price IDs into `.env.example` defaults.
-- [ ] Enable Stripe Tax on the account; validate VAT numbers on checkout (`stripe.tax.registrations.list`, `stripe.customers.update({ tax: { ... } })`).
-- [ ] Register webhook endpoint with Stripe (test + prod) and rotate `STRIPE_WEBHOOK_SECRET` into secret store.
+- [x] `lib/stripe/create-checkout-session.ts` — card/bacs_debit via `stripe.checkout.sessions.create`, invoice via `stripe.subscriptions.create({ collection_method: 'send_invoice' })`. Customer is pre-created once per org via `ensure-customer.ts`; both flows share the same Stripe customer id.
+- [x] `lib/stripe/handle-webhook.ts` — handles `checkout.session.completed`, `customer.subscription.created|updated|deleted`, `invoice.paid`, `invoice.payment_failed`. Idempotent: route checks `stripeWebhookEvents.processed` before dispatch, and licence issuance skips if a licence already exists for the invoice's period.
+- [x] `lib/stripe/customer-portal.ts` — wired and surfaced as a button on `/account` via `lib/actions/billing.ts` + `BillingPortalButton`.
+- [x] `issueLicence` wired into `invoice.paid` — calls on first payment and every renewal (new JWT per period).
+- [x] `/checkout/[tier]` gates on a saved technical contact — prevents a purchase that would fail at issuance time.
+- [x] `/checkout/success` queries the latest licence and shows it inline; falls back to "issuing your licence" UX if the webhook hasn't caught up.
+- [x] `/invoices` lists invoices from the local DB (populated by the `invoice.paid|payment_failed` webhook) with links to Stripe's hosted pages + PDFs.
+- [ ] **Operator task**: create Stripe products + prices (Pro monthly/annual, Enterprise monthly/annual) and paste the price IDs into `.env.local`.
+- [ ] **Operator task**: enable Stripe Tax on the account; validate VAT numbers on checkout (`stripe.tax.registrations.list`, `stripe.customers.update({ tax: { ... } })`).
+- [ ] **Operator task**: register webhook endpoint with Stripe (test + prod) and rotate `STRIPE_WEBHOOK_SECRET` into secret store. Events to forward: `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`.
 
 ## Phase 2 — Licence issuance
 
-- [ ] Replace `lib/licence/sign.ts` stub with real RS256 signer — load PEM from `env.licenceSigningPem` or file path, sign with `jose.SignJWT`. Payload MUST match `apps/web/lib/licence.ts` exactly (`iss`, `aud`, `sub`, `tier`, `features`, `customer`, `maxHosts?`, `jti`, `iat`, `nbf`, `exp`).
-- [ ] Write an issuer function that: generates a fresh `jti` (cuid2), looks up tier features via `featureKeysForTier` from `lib/tiers.ts`, calls `signLicence`, persists a `licence` row, and sends the "licence ready" email to the technical contact.
-- [ ] Wire it into the `invoice.paid` webhook handler (first payment) and into a scheduled renewal job (every paid period).
-- [ ] Decide whether renewals issue a *new* JWT (cleaner revocation story) or extend the existing one. Recommended: new JWT per period, deprecate old one naturally via expiry.
+- [x] Replace `lib/licence/sign.ts` stub with real RS256 signer — loads PEM from `env.licenceSigningPem` (takes precedence) or `env.licenceSigningPath`, signs with `jose.SignJWT`. Payload matches `apps/web/lib/licence.ts` exactly (`iss`, `aud`, `sub`, `tier`, `features`, `customer`, `maxHosts?`, `jti`, `iat`, `nbf`, `exp`).
+- [x] Issuer function at `lib/licence/issue.ts` — generates fresh `jti` (cuid2), resolves features via `featureKeysForTier`, calls `signLicence`, persists a `licence` row, and sends the "licence ready" email to the technical contact. Throws cleanly if the org has no technical contact.
+- [x] Renewal strategy decided: **new JWT per period**. Every call to `issueLicence` mints a new row with a new jti; natural expiry deprecates the old one, which works for air-gapped installs.
+- [ ] Wire `issueLicence` into the `invoice.paid` webhook handler (first payment) and into a scheduled renewal job (every paid period). Deferred to Phase 1 alongside the rest of the Stripe webhook handler.
 - [ ] Document production signing-key custody (AWS KMS / HashiCorp Vault Transit / HSM). The dev PEM at `deploy/scripts/licence-dev-private.pem` is for local only.
 
 ## Phase 3 — Account UX
 
 - [ ] Wire `/account` contact forms to actually persist — server action is ready, add success toast.
 - [ ] Add company detail editing (`organisations` columns) with VAT-number validation.
-- [ ] Populate `/invoices` by calling `stripe.invoices.list({ customer })` and rendering download links.
+- [x] `/invoices` populated from the local DB (webhook-driven). If a richer live view is needed, swap to `stripe.invoices.list({ customer })`.
 - [ ] Populate dashboard with real `purchase` + `licence` joins (right now it only reads licences).
 - [ ] Enforce Better Auth email verification + require TOTP MFA on first login after purchase.
 - [ ] Password reset flow (placeholder page currently tells users to email support).

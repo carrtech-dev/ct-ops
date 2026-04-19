@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises'
+import { importPKCS8, SignJWT } from 'jose'
 import { env } from '@/lib/env'
 import type { PaidTierId } from '@/lib/tiers'
 
@@ -18,34 +20,58 @@ export type SignedLicence = {
   expiresAt: Date
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// STUB — wired up in Phase 2. See apps/licence-purchase/PROGRESS.md.
-//
-// Real implementation (pseudo):
-//   import { importPKCS8, SignJWT } from 'jose'
-//   const pem = env.licenceSigningPem ?? readFileSync(env.licenceSigningPath!)
-//   const key = await importPKCS8(pem, 'RS256')
-//   const jwt = await new SignJWT({ tier, features, maxHosts, customer })
-//     .setProtectedHeader({ alg: 'RS256' })
-//     .setIssuer(env.licenceIssuer)
-//     .setAudience(env.licenceAudience)
-//     .setSubject(organisationId)
-//     .setJti(jti)
-//     .setIssuedAt(issuedAt)
-//     .setNotBefore(issuedAt)
-//     .setExpirationTime(expiresAt)
-//     .sign(key)
-//
-// Payload shape must match apps/web/lib/licence.ts (LicencePayload type).
-// ─────────────────────────────────────────────────────────────────────────────
+type SigningKey = Awaited<ReturnType<typeof importPKCS8>>
+
+let cachedKey: Promise<SigningKey> | null = null
+
+async function loadSigningKey(): Promise<SigningKey> {
+  if (cachedKey) return cachedKey
+  cachedKey = (async (): Promise<SigningKey> => {
+    const inlinePem = env.licenceSigningPem
+    const pem = inlinePem ?? (env.licenceSigningPath ? await readFile(env.licenceSigningPath, 'utf8') : undefined)
+    if (!pem) {
+      throw new Error(
+        'Licence signing key is not configured: set LICENCE_SIGNING_PRIVATE_KEY_PEM or LICENCE_SIGNING_PRIVATE_KEY_PATH',
+      )
+    }
+    return importPKCS8(pem.trim(), 'RS256')
+  })()
+  try {
+    return await cachedKey
+  } catch (err) {
+    cachedKey = null
+    throw err
+  }
+}
+
 export async function signLicence(input: SignLicenceInput): Promise<SignedLicence> {
-  console.warn('[licence] signLicence is a scaffolding stub; returning a placeholder token.', {
+  const key = await loadSigningKey()
+
+  const claims: Record<string, unknown> = {
     tier: input.tier,
-    organisationId: input.organisationId,
-    issuer: env.licenceIssuer,
-  })
+    features: input.features,
+    customer: input.customer,
+  }
+  if (input.maxHosts !== undefined) {
+    claims['maxHosts'] = input.maxHosts
+  }
+
+  const iat = Math.floor(input.issuedAt.getTime() / 1000)
+  const exp = Math.floor(input.expiresAt.getTime() / 1000)
+
+  const jwt = await new SignJWT(claims)
+    .setProtectedHeader({ alg: 'RS256' })
+    .setIssuer(env.licenceIssuer)
+    .setAudience(env.licenceAudience)
+    .setSubject(input.organisationId)
+    .setJti(input.jti)
+    .setIssuedAt(iat)
+    .setNotBefore(iat)
+    .setExpirationTime(exp)
+    .sign(key)
+
   return {
-    jwt: 'FAKE_JWT_FOR_SCAFFOLDING',
+    jwt,
     jti: input.jti,
     expiresAt: input.expiresAt,
   }

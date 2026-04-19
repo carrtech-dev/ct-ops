@@ -1,9 +1,14 @@
+import Link from 'next/link'
 import { notFound } from 'next/navigation'
+import { and, eq } from 'drizzle-orm'
 import { Nav } from '@/components/shared/nav'
 import { Footer } from '@/components/shared/footer'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { getTier } from '@/lib/tiers'
 import { getRequiredSession } from '@/lib/auth/session'
+import { db } from '@/lib/db'
+import { contacts } from '@/lib/db/schema'
 import { CheckoutForm } from './checkout-form'
 import type { BillingInterval, PaidTierId } from '@/lib/tiers'
 
@@ -28,6 +33,15 @@ export default async function CheckoutPage({
   const initialInterval: BillingInterval = interval === 'year' ? 'year' : 'month'
   const tierDef = getTier(tier)
 
+  const technical = user.organisationId
+    ? await db.query.contacts.findFirst({
+        where: and(
+          eq(contacts.organisationId, user.organisationId),
+          eq(contacts.role, 'technical'),
+        ),
+      })
+    : null
+
   return (
     <div className="flex min-h-screen flex-col">
       <Nav isAuthenticated />
@@ -42,7 +56,19 @@ export default async function CheckoutPage({
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <CheckoutForm tier={tier} initialInterval={initialInterval} />
+              {!technical ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-foreground">
+                    Please add a <strong>technical contact</strong> before checkout. This is the
+                    email that will receive the signed licence key.
+                  </p>
+                  <Button asChild>
+                    <Link href="/account">Add technical contact</Link>
+                  </Button>
+                </div>
+              ) : (
+                <CheckoutForm tier={tier} initialInterval={initialInterval} />
+              )}
             </CardContent>
           </Card>
 

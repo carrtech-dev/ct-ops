@@ -2,6 +2,7 @@ import { eq } from 'drizzle-orm'
 import { PageHeader } from '@/components/shared/page-header'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ContactForm } from '@/components/account/contact-form'
+import { BillingPortalButton } from '@/components/account/billing-portal-button'
 import { getRequiredSession } from '@/lib/auth/session'
 import { db } from '@/lib/db'
 import { contacts, organisations, users } from '@/lib/db/schema'
@@ -52,13 +53,14 @@ export default async function AccountPage() {
                 : ''}
             </CardDescription>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-4">
             <dl className="grid gap-2 text-sm md:grid-cols-2">
               <div><dt className="text-xs uppercase text-muted-foreground">Name</dt><dd className="text-foreground">{org?.name ?? '—'}</dd></div>
               <div><dt className="text-xs uppercase text-muted-foreground">Country</dt><dd className="text-foreground">{org?.country ?? '—'}</dd></div>
               <div><dt className="text-xs uppercase text-muted-foreground">VAT number</dt><dd className="text-foreground">{org?.vatNumber ?? '—'}</dd></div>
               <div><dt className="text-xs uppercase text-muted-foreground">Stripe customer</dt><dd className="font-mono text-xs text-foreground">{org?.stripeCustomerId ?? '—'}</dd></div>
             </dl>
+            <BillingPortalButton disabled={!org?.stripeCustomerId} />
           </CardContent>
         </Card>
       </div>

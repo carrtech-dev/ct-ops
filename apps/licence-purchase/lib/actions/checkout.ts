@@ -26,8 +26,9 @@ export async function startCheckout(input: unknown): Promise<void> {
     paymentMethod: parsed.paymentMethod,
     organisationId: user.organisationId,
     customerEmail: user.email,
+    customerName: user.name,
     seatCount: parsed.seatCount,
-    successUrl: `${env.appUrl}/checkout/success`,
+    successUrl: `${env.appUrl}/checkout/success?tier=${parsed.tier}`,
     cancelUrl: `${env.appUrl}/checkout/cancelled`,
   })
 
