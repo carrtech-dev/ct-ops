@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.58.0](https://github.com/carrtech-dev/ct-ops/compare/web/v0.57.1...web/v0.58.0) (2026-04-19)
+
+
+### Features
+
+* **licence:** bind licences to install via activation token ([41a912e](https://github.com/carrtech-dev/ct-ops/commit/41a912e8c7252b33ad8489817dcd6e10275a08a2))
+* **licence:** bind licences to install via activation token ([7a5d03c](https://github.com/carrtech-dev/ct-ops/commit/7a5d03cf784a414f52bb2f42321f6c82a44168d9))
+
 ## [0.57.1](https://github.com/carrtech-dev/ct-ops/compare/web/v0.57.0...web/v0.57.1) (2026-04-19)
 
 
