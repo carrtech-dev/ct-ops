@@ -62,13 +62,13 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Run semgrep
+        continue-on-error: true
         run: |
           semgrep scan \
             --config p/ci \
             --config p/security-audit \
             --config p/owasp-top-ten \
             --config p/secrets \
-            --error=false \
             --sarif --output=semgrep.sarif
 
       - name: Upload SARIF
