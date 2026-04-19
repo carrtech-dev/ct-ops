@@ -43,10 +43,10 @@ jobs:
           cache: 'pnpm'
 
       - name: Install dependencies
-        run: pnpm install --filter @infrawatch/docs --frozen-lockfile
+        run: pnpm install --filter @ct-ops/docs --frozen-lockfile
 
       - name: Build docs
-        run: pnpm --filter @infrawatch/docs build
+        run: pnpm --filter @ct-ops/docs build
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
