@@ -9,10 +9,10 @@ func TestSyntheticMetricsTickStaysInBounds(t *testing.T) {
 
 	for i := 0; i < 10_000; i++ {
 		snap := m.Tick()
-		if snap.CPUPercent < 1 || snap.CPUPercent > 99 {
+		if snap.CPUPercent < 0 || snap.CPUPercent > 100 {
 			t.Fatalf("cpu out of bounds after %d ticks: %f", i, snap.CPUPercent)
 		}
-		if snap.MemoryPercent < 5 || snap.MemoryPercent > 95 {
+		if snap.MemoryPercent < 0 || snap.MemoryPercent > 100 {
 			t.Fatalf("memory out of bounds after %d ticks: %f", i, snap.MemoryPercent)
 		}
 		if snap.DiskPercent < 10 || snap.DiskPercent > 98 {

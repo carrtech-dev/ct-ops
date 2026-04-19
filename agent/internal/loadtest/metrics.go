@@ -45,8 +45,8 @@ func NewSyntheticMetrics(agentIndex int, hostname string, jitter float64) *Synth
 	)
 
 	return &SyntheticMetrics{
-		cpuPct:       20 + float64(r.Intn(40)),
-		memPct:       30 + float64(r.Intn(40)),
+		cpuPct:       float64(r.Intn(101)),
+		memPct:       float64(r.Intn(101)),
 		diskPct:      40 + float64(r.Intn(30)),
 		uptimeSec:    int64(3600 + r.Intn(86400*7)),
 		lastTick:     time.Now(),
@@ -74,8 +74,8 @@ func (s *SyntheticMetrics) Tick() *Snapshot {
 	s.lastTick = now
 
 	step := s.jitter * 5.0
-	s.cpuPct = clamp(s.cpuPct+s.rng.NormFloat64()*step, 1, 99)
-	s.memPct = clamp(s.memPct+s.rng.NormFloat64()*step*0.6, 5, 95)
+	s.cpuPct = clamp(s.cpuPct+s.rng.NormFloat64()*step, 0, 100)
+	s.memPct = clamp(s.memPct+s.rng.NormFloat64()*step*0.6, 0, 100)
 	s.diskPct = clamp(s.diskPct+s.rng.NormFloat64()*step*0.1, 10, 98)
 
 	disks := make([]*agentv1.DiskInfo, len(s.disks))
