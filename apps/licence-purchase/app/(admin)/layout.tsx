@@ -21,6 +21,12 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           >
             Products
           </Link>
+          <Link
+            href="/admin/support"
+            className="text-muted-foreground hover:text-foreground"
+          >
+            Support
+          </Link>
         </div>
       </div>
       <main className="flex-1">{children}</main>
