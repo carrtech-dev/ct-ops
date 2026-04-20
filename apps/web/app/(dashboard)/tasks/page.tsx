@@ -1,14 +1,23 @@
 import type { Metadata } from 'next'
+import { getRequiredSession } from '@/lib/auth/session'
+import { listSchedules } from '@/lib/actions/task-schedules'
+import { SchedulesClient } from './schedules-client'
 
 export const metadata: Metadata = {
-  title: 'Tasks',
+  title: 'Scheduled Tasks',
 }
 
-export default function TasksPage() {
+export default async function ScheduledTasksPage() {
+  const session = await getRequiredSession()
+  const orgId = session.user.organisationId!
+
+  const schedules = await listSchedules(orgId)
+
   return (
-    <div>
-      <h1 className="text-2xl font-semibold text-foreground mb-2">Tasks</h1>
-      <p className="text-muted-foreground">This section is coming soon.</p>
-    </div>
+    <SchedulesClient
+      orgId={orgId}
+      userRole={session.user.role}
+      initialSchedules={schedules}
+    />
   )
 }

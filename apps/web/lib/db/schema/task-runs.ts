@@ -64,6 +64,8 @@ export const taskRuns = pgTable('task_runs', {
   organisationId: text('organisation_id').notNull().references(() => organisations.id),
   // NULL when created by the system sweeper (e.g. automated software inventory scans).
   triggeredBy: text('triggered_by').references(() => users.id),
+  // Links the run back to the task_schedules row that triggered it; NULL for ad-hoc runs.
+  scheduledFromId: text('scheduled_from_id'),
   targetType: text('target_type').notNull().$type<'host' | 'group'>(),
   targetId: text('target_id').notNull(),
   taskType: text('task_type').notNull().$type<TaskType>(),
@@ -79,6 +81,7 @@ export const taskRuns = pgTable('task_runs', {
 }, (t) => [
   index('task_runs_org_idx').on(t.organisationId, t.createdAt),
   index('task_runs_target_idx').on(t.targetType, t.targetId),
+  index('task_runs_scheduled_from_idx').on(t.scheduledFromId),
 ])
 
 export const taskRunHosts = pgTable('task_run_hosts', {
