@@ -105,4 +105,35 @@ export const env = {
   get privacyUrl() {
     return optional('PRIVACY_URL') ?? '#'
   },
+
+  // ── Support portal / AI ───────────────────────────────────────────────────
+  get anthropicApiKey() {
+    return optional('ANTHROPIC_API_KEY')
+  },
+  get supportAiKillSwitch() {
+    return optionalBool('SUPPORT_AI_KILL_SWITCH', false)
+  },
+  get supportAiModelId() {
+    return optional('SUPPORT_AI_MODEL_ID') ?? 'claude-sonnet-4-6'
+  },
+  get supportAiModerationModelId() {
+    return optional('SUPPORT_AI_MODERATION_MODEL_ID') ?? 'claude-haiku-4-5'
+  },
+  get supportGithubRepo() {
+    return optional('SUPPORT_GITHUB_REPO') ?? 'carrtech-dev/ct-ops'
+  },
+  get supportGithubReadonlyToken() {
+    return optional('GITHUB_SUPPORT_READONLY_TOKEN')
+  },
+  get supportGithubRepoBlocklist(): string[] {
+    const raw = optional('SUPPORT_GITHUB_REPO_BLOCKLIST')
+    if (!raw) return []
+    return raw.split(',').map((s) => s.trim()).filter(Boolean)
+  },
+  get supportAiMaxResponsesPerHour() {
+    return optionalInt('SUPPORT_AI_MAX_RESPONSES_PER_HOUR', 10)
+  },
+  get supportWorkerPollMs() {
+    return optionalInt('SUPPORT_WORKER_POLL_MS', 2000)
+  },
 }

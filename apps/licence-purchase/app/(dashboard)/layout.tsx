@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 const NAV: { href: string; label: string }[] = [
   { href: '/dashboard', label: 'Licences' },
   { href: '/invoices', label: 'Invoices' },
+  { href: '/support', label: 'Support' },
   { href: '/account', label: 'Account' },
 ]
 
