@@ -39,19 +39,63 @@ function globMatch(pattern: string, path: string): boolean {
   return re.test(path)
 }
 
+// Cache the file list per worker process. The tree for a mid-sized repo is
+// a few hundred KB; refreshing it once an hour is plenty for support queries.
+let treeCache: { repo: string; branch: string; paths: string[]; fetchedAt: number } | null = null
+const TREE_TTL_MS = 60 * 60 * 1000
+
+async function getDefaultBranch(repo: string): Promise<string> {
+  const url = `https://api.github.com/repos/${repo}`
+  const res = await fetch(url, { headers: apiHeaders() })
+  if (!res.ok) throw new Error(`GitHub repo lookup failed (${res.status}): ${await res.text()}`)
+  const data = (await res.json()) as { default_branch?: string }
+  return data.default_branch ?? 'main'
+}
+
+async function getRepoTree(repo: string): Promise<string[]> {
+  const now = Date.now()
+  if (treeCache && treeCache.repo === repo && now - treeCache.fetchedAt < TREE_TTL_MS) {
+    return treeCache.paths
+  }
+  const branch = await getDefaultBranch(repo)
+  const url = `https://api.github.com/repos/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`
+  const res = await fetch(url, { headers: apiHeaders() })
+  if (!res.ok) throw new Error(`GitHub tree failed (${res.status}): ${await res.text()}`)
+  const data = (await res.json()) as {
+    tree?: Array<{ path: string; type: string }>
+    truncated?: boolean
+  }
+  const paths = (data.tree ?? []).filter((n) => n.type === 'blob').map((n) => n.path)
+  treeCache = { repo, branch, paths, fetchedAt: now }
+  return paths
+}
+
+// Substring / token search over the repo's file paths. No GitHub code-index
+// dependency — works on day-one repos and mirrors. Claude follows up with
+// read_file on whichever paths look promising.
 export async function searchCode(query: string): Promise<CodeSearchHit[]> {
   const repo = env.supportGithubRepo
-  const q = encodeURIComponent(`${query} repo:${repo}`)
-  const url = `https://api.github.com/search/code?q=${q}&per_page=10`
-  const res = await fetch(url, { headers: apiHeaders() })
-  if (!res.ok) {
-    throw new Error(`GitHub search failed (${res.status}): ${await res.text()}`)
+  const allPaths = await getRepoTree(repo)
+  const terms = query
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 2)
+  if (terms.length === 0) return []
+  const scored: Array<{ path: string; score: number }> = []
+  for (const path of allPaths) {
+    if (matchesBlocklist(path)) continue
+    const lower = path.toLowerCase()
+    let score = 0
+    for (const term of terms) {
+      if (lower.includes(term)) score += 1
+    }
+    if (score > 0) scored.push({ path, score })
   }
-  const data = (await res.json()) as { items?: Array<{ path: string; html_url: string }> }
-  const items = data.items ?? []
-  return items
-    .filter((i) => !matchesBlocklist(i.path))
-    .map((i) => ({ path: i.path, url: i.html_url }))
+  scored.sort((a, b) => b.score - a.score || a.path.length - b.path.length)
+  return scored.slice(0, 20).map(({ path }) => ({
+    path,
+    url: `https://github.com/${repo}/blob/HEAD/${path}`,
+  }))
 }
 
 export async function readFile(path: string): Promise<{ path: string; content: string }> {

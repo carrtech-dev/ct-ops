@@ -19,7 +19,7 @@ Customer → Next.js page → Server Action → support_ticket / support_message
                               │ 3. Check rolling rate limit (10 / hour)          │
                               │ 4. Haiku moderation pass on the latest message   │
                               │ 5. Sonnet with tools:                            │
-                              │      - search_code(query)                        │
+                              │      - search_code(query)   # path match         │
                               │      - read_file(path)                           │
                               │      - get_customer_context(orgId)               │
                               │ 6. Insert support_message row (author='ai')      │
@@ -49,7 +49,7 @@ The system prompt is marked with `cache_control: ephemeral` so Anthropic's promp
 1. **Hard separation** — every customer message is wrapped in `<customer_message>` tags with a preface instructing the model to treat them as untrusted data.
 2. **Haiku pre-pass** — the most recent customer message is classified before the Sonnet call. Confidence ≥ 0.8 causes the ticket to be flagged and paused; no Sonnet turn runs.
 3. **Text-only output** — Claude cannot emit action directives. All side-effecting buttons (pause, resolve, close, revoke) are staff-only.
-4. **Tool allowlist** — only three tools exist: `search_code`, `read_file`, and `get_customer_context`. All are read-only.
+4. **Tool allowlist** — only three tools exist: `search_code`, `read_file`, and `get_customer_context`. All are read-only. `search_code` matches against file paths fetched via the git-trees API (cached 1h per worker process), not GitHub's code-search index — this keeps it working on fresh repos, mirrors, and private forks.
 5. **Redaction** — the module's `redact.ts` strips emails, phone numbers, JWTs, AWS keys, Stripe keys, GitHub PATs and long base64 blobs before anything reaches the API.
 6. **Pseudonymisation** — the model sees `org_<orgId>`, never the raw customer name or email.
 7. **Rate limits** — 10 AI responses per ticket per hour via `support_ai_rate`. Hitting the cap pauses the ticket.

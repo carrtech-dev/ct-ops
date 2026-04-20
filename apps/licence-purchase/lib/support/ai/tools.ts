@@ -4,15 +4,18 @@ export const supportTools: Anthropic.Tool[] = [
   {
     name: 'search_code',
     description:
-      'Search the Infrawatch GitHub repository for files matching a query. ' +
-      'Use when the customer asks about how something works or references a ' +
-      'feature by name. Returns up to 10 file paths.',
+      'Find candidate files in the Infrawatch GitHub repository by matching ' +
+      'the query against FILE PATHS (not file contents). Works best with ' +
+      'concrete nouns that appear in paths, e.g. "agent register", "licence ' +
+      'sign", "alert rule". Returns up to 20 most-matching paths. Follow up ' +
+      'with read_file on the ones that look relevant.',
     input_schema: {
       type: 'object',
       properties: {
         query: {
           type: 'string',
-          description: 'Keyword or phrase to search for. GitHub code-search syntax is supported.',
+          description:
+            'Space- or phrase-separated keywords. Each alphanumeric token of length >=2 is matched as a case-insensitive substring against each file path; paths matching more tokens rank higher.',
         },
       },
       required: ['query'],
