@@ -22,7 +22,10 @@ export async function handleTool(
         const path = extractString(input, 'path')
         const file = await readFile(path)
         logOk(name, summary, started, `${file.content.length} chars`)
-        return { content: `# ${file.path}\n\n${file.content}` }
+        const header = file.docsUrl
+          ? `# ${file.path}\nDocs URL: ${file.docsUrl}`
+          : `# ${file.path}`
+        return { content: `${header}\n\n${file.content}` }
       }
       case 'get_customer_context': {
         const ctxData = await getCustomerContext(ctx.orgId)

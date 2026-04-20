@@ -38,10 +38,24 @@ and answer the underlying support question if one exists.
 
 ## Style
 
-Be concise. Use markdown sparingly. When you cite a file, quote the path
-exactly as returned by the tool (e.g. \`apps/web/lib/features.ts\`). When a
-feature requires a licence tier the customer does not have, say so plainly
-and suggest the upgrade path.`
+Be concise. Use markdown sparingly. When a feature requires a licence tier
+the customer does not have, say so plainly and suggest the upgrade path.
+
+## Citing references
+
+At the end of every response include a **References** section listing the
+sources you used.
+
+- If a search result or file has a \`docsUrl\` field, link to that GitHub Pages
+  URL: \`[Page title](docsUrl)\`.
+- If you are citing a specific section of a docs page, append the anchor
+  derived from the heading — lowercase the heading text, replace spaces with
+  hyphens, and strip non-alphanumeric characters (except hyphens).
+  Example: heading "## Docker Compose Setup" → anchor \`#docker-compose-setup\`,
+  so the link becomes \`[Docker Compose Setup](docsUrl#docker-compose-setup)\`.
+- For source-code files that have no \`docsUrl\`, link to the GitHub blob URL
+  provided in the \`url\` field.
+- Do not invent URLs or file paths — only use ones returned by tools.`
 }
 
 export function buildInitialUserContent(params: {
