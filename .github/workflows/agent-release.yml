@@ -95,7 +95,7 @@ jobs:
       - name: Generate SBOM for binary
         uses: anchore/sbom-action@v0
         with:
-          path: dist/infrawatch-agent-${{ matrix.asset_suffix }}${{ matrix.exe_suffix }}
+          file: dist/infrawatch-agent-${{ matrix.asset_suffix }}${{ matrix.exe_suffix }}
           format: spdx-json
           output-file: dist/infrawatch-agent-${{ matrix.asset_suffix }}.spdx.json
           upload-artifact: false
