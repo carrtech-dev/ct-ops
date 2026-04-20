@@ -4,7 +4,19 @@ import { env } from '@/lib/env'
 // Uses the REST API with a fine-grained PAT. All requests use the single
 // repo configured via SUPPORT_GITHUB_REPO.
 
-export type CodeSearchHit = { path: string; url: string; snippet?: string }
+export type CodeSearchHit = { path: string; url: string; docsUrl?: string; snippet?: string }
+
+const DOCS_PREFIX = 'apps/docs/docs/'
+const DOCS_BASE = 'https://carrtech-dev.github.io/ct-ops'
+
+// Maps a docs source file path to its published GitHub Pages URL.
+// Returns null for non-docs paths.
+export function docsPageUrl(path: string): string | null {
+  if (!path.startsWith(DOCS_PREFIX)) return null
+  const rel = path.slice(DOCS_PREFIX.length)
+  if (rel === 'README.md') return `${DOCS_BASE}/`
+  return `${DOCS_BASE}/${rel.replace(/\.md$/, '.html')}`
+}
 
 function apiHeaders(): Record<string, string> {
   const token = env.supportGithubReadonlyToken
@@ -92,13 +104,15 @@ export async function searchCode(query: string): Promise<CodeSearchHit[]> {
     if (score > 0) scored.push({ path, score })
   }
   scored.sort((a, b) => b.score - a.score || a.path.length - b.path.length)
-  return scored.slice(0, 20).map(({ path }) => ({
-    path,
-    url: `https://github.com/${repo}/blob/HEAD/${path}`,
-  }))
+  return scored.slice(0, 20).map(({ path }) => {
+    const hit: CodeSearchHit = { path, url: `https://github.com/${repo}/blob/HEAD/${path}` }
+    const docs = docsPageUrl(path)
+    if (docs) hit.docsUrl = docs
+    return hit
+  })
 }
 
-export async function readFile(path: string): Promise<{ path: string; content: string }> {
+export async function readFile(path: string): Promise<{ path: string; content: string; docsUrl?: string }> {
   if (matchesBlocklist(path)) {
     throw new Error(`Path is blocked by SUPPORT_GITHUB_REPO_BLOCKLIST: ${path}`)
   }
@@ -114,5 +128,8 @@ export async function readFile(path: string): Promise<{ path: string; content: s
   // Hard cap what we feed the model — 40 KB is enough for most source files
   // and prevents a runaway tool call from exhausting the context window.
   const capped = raw.length > 40_000 ? raw.slice(0, 40_000) + '\n… [truncated]' : raw
-  return { path, content: capped }
+  const result: { path: string; content: string; docsUrl?: string } = { path, content: capped }
+  const docs = docsPageUrl(path)
+  if (docs) result.docsUrl = docs
+  return result
 }
