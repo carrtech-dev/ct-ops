@@ -28,7 +28,7 @@ jobs:
       matrix:
         include:
           - platform: linux/amd64
-            runner: self-hosted
+            runner: ubuntu-latest
             suffix: amd64
           - platform: linux/arm64
             runner: ubuntu-24.04-arm
@@ -63,8 +63,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.IMAGE_PREFIX }}/web,push-by-digest=true,name-canonical=true,push=true
-          sbom: true
-          provenance: mode=max
+          sbom: false
+          provenance: false
           cache-from: type=gha,scope=web-${{ matrix.suffix }}
           cache-to: type=gha,mode=max,scope=web-${{ matrix.suffix }}
 
@@ -84,7 +84,7 @@ jobs:
 
   merge-web:
     name: Merge web image manifests
-    runs-on: self-hosted
+    runs-on: ubuntu-24.04
     needs: build-web
     permissions:
       contents: read
@@ -137,7 +137,7 @@ jobs:
       matrix:
         include:
           - platform: linux/amd64
-            runner: self-hosted
+            runner: ubuntu-latest
             suffix: amd64
           - platform: linux/arm64
             runner: ubuntu-24.04-arm
@@ -172,8 +172,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.IMAGE_PREFIX }}/ingest,push-by-digest=true,name-canonical=true,push=true
-          sbom: true
-          provenance: mode=max
+          sbom: false
+          provenance: false
           cache-from: type=gha,scope=ingest-${{ matrix.suffix }}
           cache-to: type=gha,mode=max,scope=ingest-${{ matrix.suffix }}
 
@@ -193,7 +193,7 @@ jobs:
 
   merge-ingest:
     name: Merge ingest image manifests
-    runs-on: self-hosted
+    runs-on: ubuntu-24.04
     needs: build-ingest
     permissions:
       contents: read
