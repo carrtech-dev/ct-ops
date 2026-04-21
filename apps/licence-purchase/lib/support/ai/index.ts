@@ -1,8 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { readFile } from 'node:fs/promises'
-import { existsSync } from 'node:fs'
 import { and, eq, inArray } from 'drizzle-orm'
-import { GetObjectCommand } from '@aws-sdk/client-s3'
 import { db } from '@/lib/db'
 import {
   supportAttachments,
@@ -10,7 +7,7 @@ import {
   supportTickets,
 } from '@/lib/db/schema'
 import { env } from '@/lib/env'
-import { getR2Client, isR2StoragePath, storagePathToKey } from '@/lib/support/storage'
+import { readAttachmentBuffer } from '@/lib/support/storage'
 import { classifyForInjection } from './moderation'
 import {
   buildInitialUserContent,
@@ -113,25 +110,7 @@ export async function runAiTurn(ticketId: string): Promise<RunOutcome> {
           // Only inline images for the most recent customer message.
           if (isLastCustomer && a.mimeType.startsWith('image/')) {
             try {
-              let data: Buffer | null = null
-              if (isR2StoragePath(a.storagePath)) {
-                const s3 = getR2Client()
-                const res = await s3.send(
-                  new GetObjectCommand({
-                    Bucket: env.r2BucketName!,
-                    Key: storagePathToKey(a.storagePath),
-                  }),
-                )
-                if (res.Body) {
-                  const chunks: Uint8Array[] = []
-                  for await (const chunk of res.Body as AsyncIterable<Uint8Array>) {
-                    chunks.push(chunk)
-                  }
-                  data = Buffer.concat(chunks)
-                }
-              } else if (existsSync(a.storagePath)) {
-                data = await readFile(a.storagePath)
-              }
+              const data = await readAttachmentBuffer(a.storagePath)
               if (data) {
                 return {
                   filename: a.filename,
@@ -139,8 +118,11 @@ export async function runAiTurn(ticketId: string): Promise<RunOutcome> {
                   base64Data: data.toString('base64'),
                 }
               }
-            } catch {
-              // Fall through to returning metadata-only attachment.
+            } catch (err) {
+              console.error(
+                `[ai-worker] Failed to read attachment ${a.id} (${a.storagePath}):`,
+                err,
+              )
             }
           }
           return { filename: a.filename, mimeType: a.mimeType }

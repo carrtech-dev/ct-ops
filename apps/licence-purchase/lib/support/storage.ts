@@ -11,7 +11,7 @@
  *                  itself remains private.
  */
 
-import { mkdir, writeFile, createReadStream as fsCreateReadStream, existsSync } from 'node:fs'
+import { mkdir, writeFile, createReadStream as fsCreateReadStream, existsSync, readFile } from 'node:fs'
 import { promisify } from 'node:util'
 import path from 'node:path'
 import { Readable } from 'node:stream'
@@ -87,6 +87,39 @@ export async function uploadAttachment(options: {
   const filePath = path.join(uploadDir, filename)
   await promisify(writeFile)(filePath, buffer)
   return { storagePath: filePath }
+}
+
+// ── Read (for server-side consumers such as the AI worker) ───────────────────
+
+/**
+ * Read the raw bytes of a stored attachment.
+ * Returns null — and logs a warning — when the file cannot be found or read.
+ * Works for both local and R2 backends.
+ */
+export async function readAttachmentBuffer(storagePath: string): Promise<Buffer | null> {
+  if (isR2StoragePath(storagePath)) {
+    const key = storagePathToKey(storagePath)
+    const s3 = getR2Client()
+    const res = await s3.send(
+      new GetObjectCommand({ Bucket: env.r2BucketName!, Key: key }),
+    )
+    if (!res.Body) {
+      console.warn(`[storage] R2 object returned no body: ${key}`)
+      return null
+    }
+    const chunks: Uint8Array[] = []
+    for await (const chunk of res.Body as AsyncIterable<Uint8Array>) {
+      chunks.push(chunk)
+    }
+    return Buffer.concat(chunks)
+  }
+
+  // Local filesystem.
+  if (!existsSync(storagePath)) {
+    console.warn(`[storage] Attachment file not found on disk: ${storagePath}`)
+    return null
+  }
+  return promisify(readFile)(storagePath)
 }
 
 // ── Serve ─────────────────────────────────────────────────────────────────────

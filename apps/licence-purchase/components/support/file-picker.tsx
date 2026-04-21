@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useRef, useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { ATTACHMENT_ALLOWED_MIME_TYPES } from '@/lib/db/schema'
 
@@ -25,6 +25,19 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
+function pasteFilename(mimeType: string): string {
+  const ext =
+    mimeType === 'image/png'
+      ? 'png'
+      : mimeType === 'image/gif'
+        ? 'gif'
+        : mimeType === 'image/webp'
+          ? 'webp'
+          : 'jpg'
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+  return `screenshot-${ts}.${ext}`
+}
+
 export function FilePicker({
   ticketId,
   attachments,
@@ -37,6 +50,37 @@ export function FilePicker({
   const inputRef = useRef<HTMLInputElement>(null)
   const [uploadState, setUploadState] = useState<UploadState>({ kind: 'idle' })
 
+  // Refs so the paste handler always sees the latest props without being re-registered.
+  const attachmentsRef = useRef(attachments)
+  const onChangeRef = useRef(onChange)
+  useEffect(() => { attachmentsRef.current = attachments }, [attachments])
+  useEffect(() => { onChangeRef.current = onChange }, [onChange])
+
+  async function uploadFile(file: File) {
+    if (attachmentsRef.current.length >= MAX_FILES) {
+      setUploadState({ kind: 'error', message: `Maximum ${MAX_FILES} files per message` })
+      return
+    }
+    setUploadState({ kind: 'uploading', filename: file.name })
+    const fd = new FormData()
+    fd.append('file', file)
+    if (ticketId) fd.append('ticketId', ticketId)
+    try {
+      const res = await fetch('/api/support/upload', { method: 'POST', body: fd })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        const msg = (body as { error?: string }).error ?? `Upload failed (${res.status})`
+        setUploadState({ kind: 'error', message: msg })
+        return
+      }
+      const uploaded = (await res.json()) as PendingAttachment
+      onChangeRef.current([...attachmentsRef.current, uploaded])
+      setUploadState({ kind: 'idle' })
+    } catch {
+      setUploadState({ kind: 'error', message: 'Upload failed — please try again' })
+    }
+  }
+
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return
     const remaining = MAX_FILES - attachments.length
@@ -44,34 +88,31 @@ export function FilePicker({
       setUploadState({ kind: 'error', message: `Maximum ${MAX_FILES} files per message` })
       return
     }
-
     const toUpload = Array.from(files).slice(0, remaining)
-
     for (const file of toUpload) {
-      setUploadState({ kind: 'uploading', filename: file.name })
-      const fd = new FormData()
-      fd.append('file', file)
-      if (ticketId) fd.append('ticketId', ticketId)
-
-      try {
-        const res = await fetch('/api/support/upload', { method: 'POST', body: fd })
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}))
-          const msg = (body as { error?: string }).error ?? `Upload failed (${res.status})`
-          setUploadState({ kind: 'error', message: msg })
-          return
-        }
-        const uploaded = (await res.json()) as PendingAttachment
-        onChange([...attachments, uploaded])
-        setUploadState({ kind: 'idle' })
-      } catch {
-        setUploadState({ kind: 'error', message: 'Upload failed — please try again' })
-        return
-      }
+      await uploadFile(file)
     }
-    // Reset the input so the same file can be re-selected if removed.
     if (inputRef.current) inputRef.current.value = ''
   }
+
+  // Global paste listener — captures Ctrl/Cmd+V anywhere on the page when the
+  // clipboard contains image data (e.g. a screenshot copied from another app).
+  useEffect(() => {
+    async function onPaste(e: ClipboardEvent) {
+      const items = e.clipboardData?.items
+      if (!items) return
+      const imageItem = Array.from(items).find((item) => item.type.startsWith('image/'))
+      if (!imageItem) return
+      const blob = imageItem.getAsFile()
+      if (!blob) return
+      const filename = pasteFilename(imageItem.type)
+      await uploadFile(new File([blob], filename, { type: imageItem.type }))
+    }
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  // ticketId is stable per form instance; no other deps needed thanks to refs.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ticketId])
 
   function removeAttachment(id: string) {
     onChange(attachments.filter((a) => a.id !== id))
@@ -128,7 +169,7 @@ export function FilePicker({
               Attach files
             </Button>
             <span className="ml-2 text-xs text-muted-foreground">
-              Images, PDFs, text files — max 10 MB each
+              Images, PDFs, text files — max 10 MB each · or paste a screenshot
             </span>
           </div>
         </>

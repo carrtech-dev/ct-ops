@@ -72,7 +72,9 @@ function formatMessageText(m: TurnMessage): string {
   const nonImageAttachments = (m.attachments ?? []).filter((a) => !a.mimeType.startsWith('image/'))
   const imageAttachments = (m.attachments ?? []).filter((a) => a.mimeType.startsWith('image/'))
 
-  let text = m.author === 'customer' ? wrapCustomerText(m.body) : m.body
+  // m.body is already wrapped in <customer_message> tags for customer messages
+  // (applied by the caller in index.ts) — do NOT wrap again here.
+  let text = m.body
 
   if (nonImageAttachments.length > 0) {
     const fileList = nonImageAttachments.map((a) => `- ${a.filename}`).join('\n')
