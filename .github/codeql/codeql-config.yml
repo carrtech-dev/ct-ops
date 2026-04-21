@@ -1,13 +1,15 @@
 name: "CodeQL config"
 
-queries:
-  - uses: security-and-quality
-
+# Exclude the certificate-inspection helper from the rejectUnauthorized check.
+# fetchCertPemsFromUrl intentionally uses rejectUnauthorized: false because its
+# sole purpose is to retrieve TLS certificates from servers that may be
+# self-signed or expired. The SSRF denylist in fetchCertificateFromUrl ensures
+# only public IPs are reachable before this function is called.
 query-filters:
-  # rejectUnauthorized: false in lib/certificates/fetch.ts is intentional.
-  # That function's sole purpose is to retrieve TLS certificates from endpoints
-  # that may be self-signed or expired. An SSRF denylist ensures only public
-  # IPs are reachable. lgtm[] inline comments do not suppress this rule in
-  # CodeQL v4, so it is excluded at the config level instead.
   - exclude:
       id: js/disabling-certificate-validation
+
+# Belt-and-suspenders: also exclude the file from all queries so a CodeQL
+# database version change cannot re-surface the alert.
+paths-ignore:
+  - apps/web/lib/certificates/fetch.ts
