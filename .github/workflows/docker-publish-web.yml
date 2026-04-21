@@ -42,13 +42,19 @@ jobs:
       matrix:
         include:
           - platform: linux/amd64
-            runner: ubuntu-latest
+            runner: self-hosted
             suffix: amd64
           - platform: linux/arm64
             runner: ubuntu-24.04-arm
             suffix: arm64
 
     steps:
+      - name: Reset workspace ownership
+        if: matrix.runner == 'self-hosted'
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/ws" alpine \
+            chown -R $(id -u):$(id -g) /ws 2>/dev/null || true
+
       - name: Checkout
         uses: actions/checkout@v6
 
@@ -84,6 +90,7 @@ jobs:
 
       - name: Export digest
         run: |
+          rm -rf /tmp/digests
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
@@ -98,7 +105,7 @@ jobs:
 
   merge-web:
     name: Merge web image manifests
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: build-web
     permissions:
       contents: read
@@ -111,6 +118,9 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clean digests directory
+        run: rm -rf /tmp/digests
 
       - name: Download digests
         uses: actions/download-artifact@v8

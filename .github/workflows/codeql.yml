@@ -16,7 +16,7 @@ permissions:
 jobs:
   analyse:
     name: Analyse ${{ matrix.language }}
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     strategy:
       fail-fast: false
@@ -26,6 +26,11 @@ jobs:
           - language: go
 
     steps:
+      - name: Reset workspace ownership
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/ws" alpine \
+            chown -R $(id -u):$(id -g) /ws 2>/dev/null || true
+
       - name: Checkout
         uses: actions/checkout@v6
 

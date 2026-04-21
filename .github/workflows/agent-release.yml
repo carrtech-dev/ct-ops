@@ -35,13 +35,18 @@ jobs:
   # ── Release PR management ────────────────────────────────────────────────
   release-please:
     name: Create or update release PR
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       release_created:     ${{ steps.release.outputs['agent--release_created'] }}
       tag_name:            ${{ steps.release.outputs['agent--tag_name'] }}
       web_release_created: ${{ steps.release.outputs['apps/web--release_created'] }}
       web_tag_name:        ${{ steps.release.outputs['apps/web--tag_name'] }}
     steps:
+      - name: Reset workspace ownership
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/ws" alpine \
+            chown -R $(id -u):$(id -g) /ws 2>/dev/null || true
+
       - uses: googleapis/release-please-action@v4
         id: release
         with:
@@ -54,7 +59,7 @@ jobs:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
     needs: release-please
     if: needs.release-please.outputs.release_created == 'true'
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
 
     strategy:
       matrix:
@@ -66,6 +71,11 @@ jobs:
           - { goos: windows, goarch: amd64, asset_suffix: windows-amd64, exe_suffix: .exe }
 
     steps:
+      - name: Reset workspace ownership
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/ws" alpine \
+            chown -R $(id -u):$(id -g) /ws 2>/dev/null || true
+
       - name: Checkout
         uses: actions/checkout@v6
 
@@ -123,8 +133,13 @@ jobs:
     name: Customer bundle (web)
     needs: release-please
     if: needs.release-please.outputs.web_release_created == 'true'
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
+      - name: Reset workspace ownership
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/ws" alpine \
+            chown -R $(id -u):$(id -g) /ws 2>/dev/null || true
+
       - uses: actions/checkout@v6
         with:
           ref: ${{ needs.release-please.outputs.web_tag_name }}

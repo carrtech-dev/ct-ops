@@ -15,7 +15,7 @@ permissions:
 jobs:
   gosec:
     name: gosec (${{ matrix.module }})
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     strategy:
       fail-fast: false
       matrix:
@@ -25,6 +25,11 @@ jobs:
           - module: ingest
             path: apps/ingest
     steps:
+      - name: Reset workspace ownership
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/ws" alpine \
+            chown -R $(id -u):$(id -g) /ws 2>/dev/null || true
+
       - name: Checkout
         uses: actions/checkout@v6
 
@@ -54,7 +59,7 @@ jobs:
 
   semgrep:
     name: semgrep
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     container:
       image: semgrep/semgrep
     steps:
@@ -80,8 +85,13 @@ jobs:
 
   trivy-fs:
     name: trivy (filesystem)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
+      - name: Reset workspace ownership
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/ws" alpine \
+            chown -R $(id -u):$(id -g) /ws 2>/dev/null || true
+
       - name: Checkout
         uses: actions/checkout@v6
 
@@ -105,8 +115,13 @@ jobs:
 
   trivy-config:
     name: trivy (config / IaC)
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
+      - name: Reset workspace ownership
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/ws" alpine \
+            chown -R $(id -u):$(id -g) /ws 2>/dev/null || true
+
       - name: Checkout
         uses: actions/checkout@v6
 
