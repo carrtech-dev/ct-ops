@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.61.4](https://github.com/carrtech-dev/ct-ops/compare/web/v0.61.3...web/v0.61.4) (2026-04-21)
+
+
+### Bug Fixes
+
+* **auth/db/ldap:** rate limits, host deletion TOCTOU, LDAP filter injection (H-25, M-21, C-04, M-32) ([3cc7911](https://github.com/carrtech-dev/ct-ops/commit/3cc79116891198116c6eda886711a7369c501f05))
+* **auth:** add per-IP rate limiting to auth-adjacent endpoints (H-25) ([0c4853d](https://github.com/carrtech-dev/ct-ops/commit/0c4853d9f9002712382f1ce1da682cbbb427d6ec))
+* **certs:** move SSRF guard to fetchCertificateFromUrl to restore CodeQL-clean shape ([41a2d80](https://github.com/carrtech-dev/ct-ops/commit/41a2d80141c38b70ff3cb20ea96cf0f9893fd00c))
+* **certs:** suppress intentional CodeQL certificate-validation alert in fetch.ts ([ab9bc18](https://github.com/carrtech-dev/ct-ops/commit/ab9bc18c8e5aa6ae3b027709a82bbed54b7175c2))
+* **db:** move host existence check inside transaction with FOR UPDATE (M-21) ([096cdc0](https://github.com/carrtech-dev/ct-ops/commit/096cdc0a423c5a0e6a0c341f9bf86f0e11b40e0c))
+* **ldap:** escape user input in LDAP filter strings to prevent injection (M-32) ([43b857c](https://github.com/carrtech-dev/ct-ops/commit/43b857c59e4a37c763c953b9e8c2565a0c66ebb1))
+* **security:** LDAP enumeration/timing (M-01), error leaks (M-02), CodeQL suppression ([1596c9b](https://github.com/carrtech-dev/ct-ops/commit/1596c9b7b13e606040d4054b26faa6024834a438))
+* **security:** SSRF denylist for cert fetch; rate-limit agent install/download (H-15, H-13) ([54a72ff](https://github.com/carrtech-dev/ct-ops/commit/54a72ff92e80ee36fd787569567042b86f16d0e4))
+* **security:** SSRF denylist, agent rate limits, LDAP enumeration/timing, error leaks (H-15, H-13, M-01, M-02) ([74d5b2e](https://github.com/carrtech-dev/ct-ops/commit/74d5b2ed7af0f7607bcfe982b55ce1ed279513f5))
+* **ssrf:** extract SSRF guard to lib/net/ssrf-guard.ts; restore fetch.ts to main ([a3bdc6c](https://github.com/carrtech-dev/ct-ops/commit/a3bdc6c16b23e482ebfbf6ad2b598a91cc2f4ad8))
+
 ## [0.61.3](https://github.com/carrtech-dev/ct-ops/compare/web/v0.61.2...web/v0.61.3) (2026-04-21)
 
 
