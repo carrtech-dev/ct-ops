@@ -53,8 +53,7 @@ export function decrypt(ciphertext: string): string {
 
   if (tag.length !== TAG_LENGTH) throw new Error(`Expected ${TAG_LENGTH}-byte GCM auth tag, got ${tag.length}`)
   const key = deriveKey(salt)
-  // nosemgrep: javascript.node-crypto.security.gcm-no-tag-length.gcm-no-tag-length -- tag length enforced by the check above
-  const decipher = createDecipheriv(ALGORITHM, key, iv)
+  const decipher = createDecipheriv(ALGORITHM, key, iv) // nosemgrep: javascript.node-crypto.security.gcm-no-tag-length.gcm-no-tag-length
   decipher.setAuthTag(tag)
 
   return decipher.update(data).toString('utf8') + decipher.final('utf8')
@@ -73,8 +72,7 @@ function decryptLegacy(encrypted: string): string {
   const tag = Buffer.from(tagHex, 'hex')
   if (tag.length !== TAG_LENGTH) throw new Error(`Expected ${TAG_LENGTH}-byte GCM auth tag, got ${tag.length}`)
   const key = scryptSync(secret, LEGACY_SALT, 32)
-  // nosemgrep: javascript.node-crypto.security.gcm-no-tag-length.gcm-no-tag-length -- tag length enforced by the check above
-  const decipher = createDecipheriv(ALGORITHM, key, Buffer.from(ivHex, 'hex'))
+  const decipher = createDecipheriv(ALGORITHM, key, Buffer.from(ivHex, 'hex')) // nosemgrep: javascript.node-crypto.security.gcm-no-tag-length.gcm-no-tag-length
   decipher.setAuthTag(tag)
 
   let decrypted = decipher.update(ciphertextHex, 'hex', 'utf8')
