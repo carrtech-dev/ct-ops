@@ -116,8 +116,9 @@ export async function GET(req: NextRequest) {
 
   const rowsOrTimeout = await db
     .transaction(async (tx) => {
-      await tx.execute(sql`SET LOCAL statement_timeout = '30s'`)
-      return tx
+      // tx type differs from db in drizzle-orm/postgres-js — cast matches the pattern in tags.ts
+      await (tx as unknown as typeof db).execute(sql`SET LOCAL statement_timeout = '30s'`)
+      return await tx
         .select({
           name: softwarePackages.name,
           version: softwarePackages.version,
