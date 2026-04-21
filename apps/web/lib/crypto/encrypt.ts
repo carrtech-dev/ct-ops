@@ -51,7 +51,9 @@ export function decrypt(ciphertext: string): string {
   const tag = blob.subarray(1 + SALT_LENGTH + IV_LENGTH, 1 + SALT_LENGTH + IV_LENGTH + TAG_LENGTH)
   const data = blob.subarray(1 + SALT_LENGTH + IV_LENGTH + TAG_LENGTH)
 
+  if (tag.length !== TAG_LENGTH) throw new Error(`Expected ${TAG_LENGTH}-byte GCM auth tag, got ${tag.length}`)
   const key = deriveKey(salt)
+  // nosemgrep: javascript.node-crypto.security.gcm-no-tag-length.gcm-no-tag-length -- tag length enforced by the check above
   const decipher = createDecipheriv(ALGORITHM, key, iv)
   decipher.setAuthTag(tag)
 
@@ -68,9 +70,12 @@ function decryptLegacy(encrypted: string): string {
   const secret = process.env['BETTER_AUTH_SECRET']
   if (!secret) throw new Error('BETTER_AUTH_SECRET is not set')
 
+  const tag = Buffer.from(tagHex, 'hex')
+  if (tag.length !== TAG_LENGTH) throw new Error(`Expected ${TAG_LENGTH}-byte GCM auth tag, got ${tag.length}`)
   const key = scryptSync(secret, LEGACY_SALT, 32)
+  // nosemgrep: javascript.node-crypto.security.gcm-no-tag-length.gcm-no-tag-length -- tag length enforced by the check above
   const decipher = createDecipheriv(ALGORITHM, key, Buffer.from(ivHex, 'hex'))
-  decipher.setAuthTag(Buffer.from(tagHex, 'hex'))
+  decipher.setAuthTag(tag)
 
   let decrypted = decipher.update(ciphertextHex, 'hex', 'utf8')
   decrypted += decipher.final('utf8')
