@@ -42,7 +42,7 @@ jobs:
       matrix:
         include:
           - platform: linux/amd64
-            runner: ubuntu-latest
+            runner: self-hosted
             suffix: amd64
           - platform: linux/arm64
             runner: ubuntu-24.04-arm
@@ -84,6 +84,7 @@ jobs:
 
       - name: Export digest
         run: |
+          rm -rf /tmp/digests
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
@@ -98,7 +99,7 @@ jobs:
 
   merge-web:
     name: Merge web image manifests
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: build-web
     permissions:
       contents: read
@@ -111,6 +112,9 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Clean digests directory
+        run: rm -rf /tmp/digests
 
       - name: Download digests
         uses: actions/download-artifact@v8
