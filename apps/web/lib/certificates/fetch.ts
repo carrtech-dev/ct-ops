@@ -426,39 +426,15 @@ function isPrivateIp(ip: string): boolean {
   return true // unrecognised format — deny by default
 }
 
-export async function fetchCertPemsFromUrl(host: string, port: number, serverName: string): Promise<string[]> {
-  // Resolve the target to an IP before connecting so private/loopback addresses are rejected
-  // even when supplied as hostnames. Using the resolved IP for the actual TCP connection also
-  // prevents DNS-rebinding attacks.
-  let resolvedIp: string
-  if (net.isIPv4(host) || net.isIPv6(host)) {
-    resolvedIp = host
-  } else {
-    const { address } = await dns.promises.lookup(host)
-    resolvedIp = address
-  }
-  if (isPrivateIp(resolvedIp)) {
-    throw new Error(
-      `Blocked: target resolves to a private or reserved address (${resolvedIp}). ` +
-        'Use a publicly routable hostname.',
-    )
-  }
-
+// host must already be a validated, SSRF-checked IP address — callers are responsible
+// for resolving the hostname and rejecting private ranges before calling this function.
+export function fetchCertPemsFromUrl(host: string, port: number, serverName: string): Promise<string[]> {
   return new Promise((resolve, reject) => {
-    // Connect via the resolved IP; pass original hostname as SNI servername to avoid breaking TLS.
-    // rejectUnauthorized: false is intentional — this function's only purpose is to retrieve
-    // the server's TLS certificate for inspection, including self-signed and expired ones.
-    // The SSRF denylist above ensures only public IPs are reachable. No sensitive payload
-    // is sent; the connection is closed immediately after the handshake.
+    // rejectUnauthorized: false is intentional: this function retrieves TLS certificates
+    // for inspection, including self-signed and expired ones. Callers must pass a
+    // pre-resolved public IP (SSRF guard enforced in fetchCertificateFromUrl).
     const socket = tls.connect(
-      {
-        host: resolvedIp,
-        port,
-        servername: serverName,
-        // lgtm[js/disabling-certificate-validation]
-        rejectUnauthorized: false, // lgtm[js/disabling-certificate-validation]
-        timeout: 10_000,
-      },
+      { host, port, servername: serverName, rejectUnauthorized: false, timeout: 10_000 },
       () => {
         const peerCert = socket.getPeerCertificate(true)
         socket.end()
@@ -496,7 +472,25 @@ export async function fetchCertificateFromUrl(
   serverNameOverride?: string,
 ): Promise<FetchUrlResult> {
   const { host, port, serverName } = resolveUrlTarget(rawUrl, portOverride, serverNameOverride)
-  const pems = await fetchCertPemsFromUrl(host, port, serverName)
+
+  // SSRF guard: resolve hostname to an IP and reject private/reserved ranges.
+  // The resolved IP is passed to fetchCertPemsFromUrl so the TCP socket connects
+  // directly to that IP, closing the DNS-rebinding window between check and connect.
+  let resolvedIp: string
+  if (net.isIPv4(host) || net.isIPv6(host)) {
+    resolvedIp = host
+  } else {
+    const { address } = await dns.promises.lookup(host)
+    resolvedIp = address
+  }
+  if (isPrivateIp(resolvedIp)) {
+    throw new Error(
+      `Blocked: target resolves to a private or reserved address (${resolvedIp}). ` +
+        'Use a publicly routable hostname.',
+    )
+  }
+
+  const pems = await fetchCertPemsFromUrl(resolvedIp, port, serverName)
   const forgeCerts = pems.map(pemToForgeCert)
   const chain = forgeCerts.length > 1 ? buildChain(forgeCerts) : []
   const certificate = parseForgeCert(forgeCerts[0]!, pems[0]!)
