@@ -10,7 +10,19 @@ import { createRateLimiter } from '@/lib/rate-limit'
 // 5 attempts per IP per 60 seconds — prevents brute-force and user enumeration
 const ldapRateLimit = createRateLimiter(60_000, 5)
 
+// Enforce a minimum response time for all auth outcomes to resist timing-based
+// user enumeration. A valid user that proceeds through DB operations takes longer
+// than an invalid one that fails at LDAP search; the floor + jitter narrows that gap.
+async function withAuthDelay<T>(start: number, value: T): Promise<T> {
+  const minMs = 400 + Math.floor(Math.random() * 200) // 400–600 ms
+  const elapsed = Date.now() - start
+  if (elapsed < minMs) await new Promise((r) => setTimeout(r, minMs - elapsed))
+  return value
+}
+
 export async function POST(request: NextRequest) {
+  const requestStart = Date.now()
+
   try {
   const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
     ?? request.headers.get('x-real-ip')
@@ -117,7 +129,12 @@ export async function POST(request: NextRequest) {
       where: eq(users.id, userId),
     })
     if (!user || !user.isActive || user.deletedAt) {
-      return NextResponse.json({ error: 'Account is disabled' }, { status: 403 })
+      // Log internally but return the same generic error to avoid leaking account existence.
+      console.warn(`[LDAP] Login rejected — account inactive or deleted: userId=${userId}`)
+      return withAuthDelay(
+        requestStart,
+        NextResponse.json({ error: 'Invalid credentials' }, { status: 401 }),
+      )
     }
 
     // Create session
@@ -156,14 +173,19 @@ export async function POST(request: NextRequest) {
       expires: expiresAt,
     })
 
-    return response
+    return withAuthDelay(requestStart, response)
   }
 
   console.error(`[LDAP] All configs failed for user "${username}":`, errors)
-  return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 })
+  return withAuthDelay(
+    requestStart,
+    NextResponse.json({ error: 'Invalid credentials' }, { status: 401 }),
+  )
   } catch (err) {
     console.error('[LDAP] Unexpected error during login:', err)
-    const message = err instanceof Error ? err.message : 'Unknown error'
-    return NextResponse.json({ error: `Login failed: ${message}` }, { status: 500 })
+    return withAuthDelay(
+      requestStart,
+      NextResponse.json({ error: 'An unexpected error occurred' }, { status: 500 }),
+    )
   }
 }
