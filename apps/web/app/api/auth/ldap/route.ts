@@ -4,8 +4,25 @@ import { users, accounts, sessions, ldapConfigurations } from '@/lib/db/schema'
 import { eq, and, isNull } from 'drizzle-orm'
 import { authenticateUser } from '@/lib/ldap/client'
 import { createId } from '@paralleldrive/cuid2'
-import { randomBytes, createHmac } from 'crypto'
+import { randomBytes } from 'crypto'
 import { createRateLimiter } from '@/lib/rate-limit'
+
+// Produce a signed cookie value in exactly the format Hono's serializeSigned uses:
+// encodeURIComponent(`${value}.${btoa(HMAC-SHA256(value, secret))}`).
+// Better Auth's getSession delegates cookie verification to Hono, so this must
+// match Hono's implementation byte-for-byte to avoid silent session failures.
+async function makeSessionCookieValue(token: string, secret: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  )
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(token))
+  const base64Sig = btoa(String.fromCharCode(...new Uint8Array(sig)))
+  return encodeURIComponent(`${token}.${base64Sig}`)
+}
 
 // 5 attempts per IP per 60 seconds — prevents brute-force and user enumeration
 const ldapRateLimit = createRateLimiter(60_000, 5)
@@ -149,12 +166,8 @@ export async function POST(request: NextRequest) {
       userAgent: request.headers.get('user-agent') ?? null,
     })
 
-    // Sign the session token using HMAC-SHA256 to match Better Auth's signed cookie format.
-    // Better Auth uses setSignedCookie which produces: encodeURIComponent(token.base64(HMAC-SHA256(token, secret)))
-    // and getSignedCookie verifies the signature before returning the token.
     const authSecret = process.env['BETTER_AUTH_SECRET'] ?? ''
-    const signature = createHmac('sha256', authSecret).update(sessionToken).digest('base64')
-    const signedToken = `${sessionToken}.${signature}`
+    const cookieValue = await makeSessionCookieValue(sessionToken, authSecret)
 
     const response = NextResponse.json({
       success: true,
@@ -165,13 +178,11 @@ export async function POST(request: NextRequest) {
       },
     })
 
-    response.cookies.set('better-auth.session_token', signedToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      path: '/',
-      expires: expiresAt,
-    })
+    // Set the cookie with an already-encoded value (Next.js would double-encode otherwise).
+    response.headers.append(
+      'Set-Cookie',
+      `better-auth.session_token=${cookieValue}; Path=/; HttpOnly; SameSite=Lax${process.env.NODE_ENV === 'production' ? '; Secure' : ''}; Expires=${expiresAt.toUTCString()}`,
+    )
 
     return withAuthDelay(requestStart, response)
   }
