@@ -8,7 +8,9 @@ import {
   fetchCertificateFromUrl,
   parseCertificateBuffer,
   pemToForgeCert,
+  resolveUrlTarget,
 } from '@/lib/certificates/fetch'
+import { assertPublicHost } from '@/lib/net/ssrf-guard'
 
 export type { ParsedCertificate, ParsedSAN, ChainEntry } from '@/lib/certificates/fetch'
 
@@ -79,6 +81,8 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     }
 
     if (data.action === 'fetch-url') {
+      const { host } = resolveUrlTarget(data.url, data.port)
+      await assertPublicHost(host)
       const { certificate } = await fetchCertificateFromUrl(data.url, data.port, data.servername)
       const keyMatch = data.keyPem ? checkKeyMatch(data.keyPem, certificate.pem) : undefined
       return NextResponse.json({ ok: true, certificate, keyMatch } satisfies CertCheckerResponse)
@@ -136,7 +140,19 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
     return NextResponse.json({ ok: false, error: 'Unknown action' }, { status: 400 })
   } catch (err) {
+    console.error('[certificate-checker] Unexpected error:', err)
     const message = err instanceof Error ? err.message : 'Internal error'
-    return NextResponse.json({ ok: false, error: message }, { status: 500 })
+    // Expose the message only for operational errors whose text is explicitly user-friendly
+    // (e.g. SSRF guard, size limit, parse failure). Avoid leaking raw stack traces.
+    const isSafe =
+      message.startsWith('Blocked:') ||
+      message.startsWith('Server returned a certificate') ||
+      message.startsWith('Unable to parse certificate') ||
+      message.startsWith('Connection timed out') ||
+      message.startsWith('No certificate received')
+    return NextResponse.json(
+      { ok: false, error: isSafe ? message : 'An unexpected error occurred' },
+      { status: 500 },
+    )
   }
 }
