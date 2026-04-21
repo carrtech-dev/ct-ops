@@ -55,7 +55,6 @@ export default defineUserConfig({
           '/architecture/agent.md',
           '/architecture/ingest.md',
           '/architecture/deployment-profiles.md',
-          '/architecture/support-ai.md',
         ],
       },
       {
@@ -78,8 +77,6 @@ export default defineUserConfig({
           '/features/scheduled-tasks.md',
           '/features/tags.md',
           '/features/notes.md',
-          '/features/storefront.md',
-          '/features/support-portal.md',
         ],
       },
       {

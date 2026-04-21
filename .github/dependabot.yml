@@ -22,7 +22,6 @@ updates:
       - "/apps/web"
       - "/apps/docs"
       - "/apps/ingest"
-      - "/apps/licence-purchase"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -51,7 +50,6 @@ updates:
       - "/"
       - "/apps/web"
       - "/apps/docs"
-      - "/apps/licence-purchase"
     schedule:
       interval: "weekly"
       day: "monday"
