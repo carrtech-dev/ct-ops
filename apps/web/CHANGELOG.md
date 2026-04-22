@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.61.6](https://github.com/carrtech-dev/ct-ops/compare/web/v0.61.5...web/v0.61.6) (2026-04-22)
+
+
+### Bug Fixes
+
+* **sec:** enforce GCM auth tag length; sanitise log interpolation ([d23c174](https://github.com/carrtech-dev/ct-ops/commit/d23c174f8c465e980e518e9655065b80abf15cbf))
+* **sec:** M-07 terminal regex, H-03/H-04 LDAP encryption, M-14 crypto-lint CI, M-29 autoApprove gate ([feb0a87](https://github.com/carrtech-dev/ct-ops/commit/feb0a87194021d328b77fb6d9d40a0f13a7e3a4c))
+* **sec:** M-07 tighten terminal username regex; H-03/H-04 per-record salt + LDAP key; M-14 crypto-lint CI; M-29 restrict autoApprove tokens to super_admin ([5b151c4](https://github.com/carrtech-dev/ct-ops/commit/5b151c4be905f6251d2ddf158a0292caec068e65))
+* **sec:** move nosemgrep annotations inline with createDecipheriv calls ([abc77a2](https://github.com/carrtech-dev/ct-ops/commit/abc77a2e1e9cda2f4c61fe46414edf71b9ec9889))
+* **sec:** remove console.warn with tainted parameters from autoApprove gate ([4d18106](https://github.com/carrtech-dev/ct-ops/commit/4d181065f9cd263f748f7acc2e4fce2fcd442810))
+* **sec:** remove user-supplied label from autoApprove audit log ([81e8921](https://github.com/carrtech-dev/ct-ops/commit/81e8921a48d8a25ef01910ee99cc1e82e181d443))
+* **terminal:** support same-origin WebSocket for Cloudflare tunnel ([195a6ec](https://github.com/carrtech-dev/ct-ops/commit/195a6ec3dd2fee81398efb06506792b9a824b3dd))
+* **terminal:** support same-origin WebSocket for Cloudflare tunnel ([490882e](https://github.com/carrtech-dev/ct-ops/commit/490882e0f29ac80859683730baa996261504ae57))
+
+## [0.61.5](https://github.com/carrtech-dev/ct-ops/compare/web/v0.61.4...web/v0.61.5) (2026-04-21)
+
+
+### Bug Fixes
+
+* **sec:** H-05 encrypt bindDn and tlsCertificate for LDAP configs at rest ([880b446](https://github.com/carrtech-dev/ct-ops/commit/880b4467680539d2e3add7fe74c868ea7ad59b76))
+* **sec:** H-06 raise minimum password length to 12 characters ([6eb847f](https://github.com/carrtech-dev/ct-ops/commit/6eb847f31f0fa23ae41f0540706bce64303fdc0a))
+* **sec:** H-09 align LDAP session cookie signing with Hono's exact format ([61bd0f9](https://github.com/carrtech-dev/ct-ops/commit/61bd0f94f35b9ed46bb03b30dd9518ee00fad35e))
+
+## [0.61.4](https://github.com/carrtech-dev/ct-ops/compare/web/v0.61.3...web/v0.61.4) (2026-04-21)
+
+
+### Bug Fixes
+
+* **auth/db/ldap:** rate limits, host deletion TOCTOU, LDAP filter injection (H-25, M-21, C-04, M-32) ([3cc7911](https://github.com/carrtech-dev/ct-ops/commit/3cc79116891198116c6eda886711a7369c501f05))
+* **auth:** add per-IP rate limiting to auth-adjacent endpoints (H-25) ([0c4853d](https://github.com/carrtech-dev/ct-ops/commit/0c4853d9f9002712382f1ce1da682cbbb427d6ec))
+* **certs:** move SSRF guard to fetchCertificateFromUrl to restore CodeQL-clean shape ([41a2d80](https://github.com/carrtech-dev/ct-ops/commit/41a2d80141c38b70ff3cb20ea96cf0f9893fd00c))
+* **certs:** suppress intentional CodeQL certificate-validation alert in fetch.ts ([ab9bc18](https://github.com/carrtech-dev/ct-ops/commit/ab9bc18c8e5aa6ae3b027709a82bbed54b7175c2))
+* **db:** move host existence check inside transaction with FOR UPDATE (M-21) ([096cdc0](https://github.com/carrtech-dev/ct-ops/commit/096cdc0a423c5a0e6a0c341f9bf86f0e11b40e0c))
+* **ldap:** escape user input in LDAP filter strings to prevent injection (M-32) ([43b857c](https://github.com/carrtech-dev/ct-ops/commit/43b857c59e4a37c763c953b9e8c2565a0c66ebb1))
+* **security:** LDAP enumeration/timing (M-01), error leaks (M-02), CodeQL suppression ([1596c9b](https://github.com/carrtech-dev/ct-ops/commit/1596c9b7b13e606040d4054b26faa6024834a438))
+* **security:** SSRF denylist for cert fetch; rate-limit agent install/download (H-15, H-13) ([54a72ff](https://github.com/carrtech-dev/ct-ops/commit/54a72ff92e80ee36fd787569567042b86f16d0e4))
+* **security:** SSRF denylist, agent rate limits, LDAP enumeration/timing, error leaks (H-15, H-13, M-01, M-02) ([74d5b2e](https://github.com/carrtech-dev/ct-ops/commit/74d5b2ed7af0f7607bcfe982b55ce1ed279513f5))
+* **ssrf:** extract SSRF guard to lib/net/ssrf-guard.ts; restore fetch.ts to main ([a3bdc6c](https://github.com/carrtech-dev/ct-ops/commit/a3bdc6c16b23e482ebfbf6ad2b598a91cc2f4ad8))
+
 ## [0.61.3](https://github.com/carrtech-dev/ct-ops/compare/web/v0.61.2...web/v0.61.3) (2026-04-21)
 
 

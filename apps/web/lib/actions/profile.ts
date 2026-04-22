@@ -131,7 +131,7 @@ export async function updateNotificationPreference(
 
 const changePasswordSchema = z.object({
   currentPassword: z.string().min(1, 'Current password is required'),
-  newPassword: z.string().min(8, 'New password must be at least 8 characters'),
+  newPassword: z.string().min(12, 'New password must be at least 12 characters').max(128, 'New password must be at most 128 characters'),
 })
 
 export async function updatePassword(
