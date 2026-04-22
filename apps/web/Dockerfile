@@ -3,6 +3,31 @@ FROM node:22-alpine AS base
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@10 --activate
 
+# --- Agent binary build stage ---
+# Cross-compiles every supported agent binary so the web image is self-contained.
+# The download route falls back to these baked binaries when the operator-managed
+# volume is empty and GitHub is unreachable (air-gap installs).
+FROM golang:1.25-alpine AS agent-builder
+RUN apk add --no-cache jq
+WORKDIR /src
+# `replace github.com/carrtech-dev/ct-ops/proto => ../proto/gen/go` in agent/go.mod
+# means proto/gen/go must be present at the same relative location.
+COPY agent/         ./agent/
+COPY proto/gen/go/  ./proto/gen/go/
+COPY .release-please-manifest.json ./
+RUN AGENT_VERSION="v$(jq -r '.agent' .release-please-manifest.json)" && \
+    mkdir -p /out && cd agent && \
+    for p in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64; do \
+      os="${p%%/*}"; arch="${p##*/}"; \
+      ext=""; [ "$os" = "windows" ] && ext=".exe"; \
+      echo "Building agent ${os}/${arch} (version ${AGENT_VERSION})..."; \
+      CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build \
+        -trimpath \
+        -ldflags="-s -w -X main.version=${AGENT_VERSION}" \
+        -o "/out/ct-ops-agent-${os}-${arch}${ext}" \
+        ./cmd/agent; \
+    done
+
 # --- Dependencies stage ---
 FROM base AS deps
 WORKDIR /app
@@ -72,10 +97,12 @@ COPY --from=builder --chown=nextjs:nodejs /app/apps/web/.next/static ./apps/web/
 # Release-please manifest — read at runtime to determine the required agent version
 COPY --from=builder --chown=nextjs:nodejs /app/.release-please-manifest.json /app/.release-please-manifest.json
 
-# Agent binaries — baked into the image as a bootstrap fallback for air-gapped
-# deployments where the operator-managed agent_dist volume starts empty and
-# GitHub is unreachable. The download route checks this directory last.
-COPY --chown=nextjs:nodejs apps/web/data/agent-dist ./apps/web/data/agent-dist
+# Agent binaries — built fresh in the agent-builder stage so every web image is
+# self-contained. The download route's resolveAgentBinary() checks this directory
+# as a fallback when the operator-managed agent_dist volume is empty and GitHub
+# is unreachable (air-gap installs).
+RUN mkdir -p /app/apps/web/data/agent-dist && chown nextjs:nodejs /app/apps/web/data/agent-dist
+COPY --from=agent-builder --chown=nextjs:nodejs --chmod=755 /out/ ./apps/web/data/agent-dist/
 
 # Migration script — from builder stage (same source, no caching concern)
 COPY --from=builder --chown=nextjs:nodejs /app/apps/web/migrate.js ./apps/web/migrate.js

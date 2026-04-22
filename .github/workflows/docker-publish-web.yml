@@ -6,6 +6,8 @@ on:
       - main
     paths:
       - 'apps/web/**'
+      - 'agent/**'
+      - 'proto/gen/go/**'
       - 'packages/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
@@ -18,6 +20,8 @@ on:
       - main
     paths:
       - 'apps/web/**'
+      - 'agent/**'
+      - 'proto/gen/go/**'
       - 'packages/**'
       - 'package.json'
       - 'pnpm-lock.yaml'
