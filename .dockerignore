@@ -1,6 +1,7 @@
 node_modules
 apps/web/node_modules
 apps/ingest/vendor
+apps/web/data
 dist
 deploy/dev-tls
 .git
