@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.0](https://github.com/carrtech-dev/ct-ops/compare/agent/v0.29.0...agent/v0.30.0) (2026-04-23)
+
+
+### Features
+
+* **deploy:** bundle nginx TLS terminator with pinned-cert rotation ([#514](https://github.com/carrtech-dev/ct-ops/issues/514)) ([b3a43c9](https://github.com/carrtech-dev/ct-ops/commit/b3a43c95903096f11f460d3fd862f7a243e69980))
+
 ## [0.29.0](https://github.com/carrtech-dev/ct-ops/compare/agent/v0.28.3...agent/v0.29.0) (2026-04-23)
 
 
