@@ -111,8 +111,12 @@ services:
     image: nginx:1.27-alpine
     restart: unless-stopped
     depends_on:
-      - web
-      - ingest
+      tls-init:
+        condition: service_completed_successfully
+      web:
+        condition: service_started
+      ingest:
+        condition: service_started
     ports:
       - "${NGINX_HTTPS_PORT:-443}:443"
       - "${NGINX_HTTP_PORT:-80}:80"
@@ -124,6 +128,42 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
+
+  # Generates the nginx server cert on first boot if deploy/tls is empty.
+  # Reuses the nginx:alpine image (openssl is included) so we don't add a
+  # second image to the pull list — this matters for air-gap bundles. The
+  # cert is created as a run-once job: container exits 0 when done, and
+  # nginx starts only after a successful exit (depends_on above). When
+  # start.sh has already populated deploy/tls/ this is a no-op.
+  tls-init:
+    image: nginx:1.27-alpine
+    restart: "no"
+    user: "0:0"
+    volumes:
+      - ./deploy/tls:/tls
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        if [ -f /tls/server.crt ] && [ -f /tls/server.key ]; then
+          echo "tls-init: cert already present at /tls — skipping generation."
+          exit 0
+        fi
+        if ! command -v openssl >/dev/null 2>&1; then
+          echo "tls-init: installing openssl..."
+          apk add --no-cache openssl >/dev/null
+        fi
+        echo "tls-init: generating self-signed cert at /tls..."
+        openssl req -x509 -newkey rsa:4096 -sha256 -days 365 -nodes \
+          -keyout /tls/server.key \
+          -out /tls/server.crt \
+          -subj "/CN=ct-ops" \
+          -addext "subjectAltName=DNS:localhost,DNS:ingest,IP:127.0.0.1" 2>/dev/null
+        chmod 600 /tls/server.key
+        chmod 644 /tls/server.crt
+        echo "tls-init: wrote /tls/server.{crt,key}. Replace with your own cert"
+        echo "tls-init: at any time to remove the browser warning."
 
 volumes:
   db_data:
