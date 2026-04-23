@@ -18,7 +18,9 @@ All CT-Ops configuration is via environment variables. There are no config files
 | `NEXT_PUBLIC_APP_URL` | — | — | Exposed to the browser — used for constructing absolute links |
 | `NODE_ENV` | — | `development` | Set to `production` in production |
 | `AGENT_DIST_DIR` | — | `/var/lib/ct-ops/agent-dist` | Directory where compiled agent binaries are stored for download |
-| `INGEST_WS_URL` | — | `ws://localhost:8080` | WebSocket URL of the ingest service. Use `wss://` in production — `ws://` sends terminal streams in plaintext |
+| `AGENT_DOWNLOAD_BASE_URL` | — | `https://localhost` | Public URL agents use to download new binaries. Must be reachable from every agent host |
+| `INGEST_WS_URL` | — | *(empty)* | WebSocket URL of the ingest service. Empty = same-origin via the bundled nginx (recommended). Set to an absolute `wss://` URL only to bypass the bundled proxy |
+| `WEB_TLS_CERT` | — | `/var/lib/ct-ops/server-tls/server.crt` | Path to the nginx-facing server cert. The enrolment bundle route reads this file and embeds it so agents can verify the HTTPS download URL |
 
 ### Licence verification
 
@@ -33,10 +35,11 @@ CT-Ops validates licence JWTs using an RSA public key. The production public key
 ```env
 DATABASE_URL=postgresql://ct-ops:ct-ops@localhost:5432/ct-ops
 BETTER_AUTH_SECRET=change-me-to-something-long-and-random-in-production
-BETTER_AUTH_URL=http://localhost:3000
-BETTER_AUTH_TRUSTED_ORIGINS=http://localhost:3000
-NEXT_PUBLIC_APP_URL=http://localhost:3000
-INGEST_WS_URL=ws://localhost:8080
+BETTER_AUTH_URL=https://localhost
+BETTER_AUTH_TRUSTED_ORIGINS=https://localhost
+AGENT_DOWNLOAD_BASE_URL=https://localhost
+NEXT_PUBLIC_APP_URL=https://localhost
+INGEST_WS_URL=
 ```
 
 ---
@@ -51,7 +54,8 @@ INGEST_WS_URL=ws://localhost:8080
 | `INGEST_JWT_KEY_FILE` | — | `/var/lib/ct-ops/jwt_key.pem` | Path to RSA private key for JWT signing (auto-generated if missing) |
 | `INGEST_GRPC_PORT` | — | `9443` | gRPC listener port |
 | `INGEST_HTTP_PORT` | — | `8080` | HTTP port for JWKS endpoint and health check |
-| `INGEST_AGENT_DOWNLOAD_BASE_URL` | — | `http://localhost:3000` | Public URL of the web app — agents construct their binary download URL from this |
+| `INGEST_AGENT_DOWNLOAD_BASE_URL` | — | `https://localhost` | Public URL of the web app — agents construct their binary download URL from this |
+| `INGEST_WEB_SERVER_CERT` | — | `/etc/ct-ops/server-tls/server.crt` | Path to the nginx-facing server cert. Ingest reads this and pushes rotations down the heartbeat stream when an operator swaps the cert, so agents keep verifying download URLs without manual CA distribution. Empty disables the rotation RPC |
 
 :::warning JWT Key Backup
 Back up `INGEST_JWT_KEY_FILE`. Losing it invalidates all existing agent JWTs and forces every agent to re-register.
@@ -102,9 +106,20 @@ All TOML values can be overridden via environment variables:
 
 ## Ports Summary
 
+Public ports (bound to all interfaces):
+
 | Service | Port | Protocol | Purpose |
 |---|---|---|---|
-| Web | 3000 | HTTP/HTTPS | Web UI |
-| Ingest | 9443 | gRPC over TLS | Agent connections |
-| Ingest | 8080 | HTTP | JWKS endpoint, `/healthz` |
+| nginx | 443 | HTTPS | Browser traffic — TLS termination |
+| nginx | 80 | HTTP | Redirect to :443 |
+| Ingest | 9443 | gRPC + mTLS | Agent connections (bypasses nginx) |
+
+Loopback-only ports (reachable from the host over SSH tunnels only):
+
+| Service | Port | Protocol | Purpose |
+|---|---|---|---|
+| Web | 3000 | HTTP | Next.js — fronted by nginx |
+| Ingest | 8080 | HTTP | JWKS, `/healthz`, WebSocket terminal — fronted by nginx |
 | PostgreSQL | 5432 | TCP | Database |
+
+Override the nginx port bindings with `NGINX_HTTPS_PORT` and `NGINX_HTTP_PORT` in `.env` if 443/80 are already in use.

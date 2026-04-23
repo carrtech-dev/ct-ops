@@ -10,6 +10,8 @@
 package updater
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"log/slog"
@@ -17,12 +19,18 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 )
 
 // Update downloads the agent binary for the current OS/arch from downloadBaseURL,
 // atomically replaces the running executable, and re-execs into the new binary.
-// If it returns, an error occurred and the caller should continue running.
-func Update(latestVersion, downloadBaseURL string) error {
+// pinnedServerCertPEM, when non-empty, is appended to the system CA pool so
+// the agent can verify HTTPS downloads even when the server's cert is signed
+// by a private CA not in the host trust store. This covers the common Linux
+// VM scenario where an operator has replaced the self-signed bundled cert
+// with one from their internal CA.
+// If Update returns, an error occurred and the caller should continue running.
+func Update(latestVersion, downloadBaseURL string, pinnedServerCertPEM []byte) error {
 	url := fmt.Sprintf(
 		"%s?os=%s&arch=%s",
 		downloadBaseURL,
@@ -55,7 +63,13 @@ func Update(latestVersion, downloadBaseURL string) error {
 		}
 	}()
 
-	resp, err := http.Get(url) //nolint:gosec // URL is constructed from server-supplied base URL
+	client, err := buildHTTPClient(pinnedServerCertPEM)
+	if err != nil {
+		tmp.Close()
+		return fmt.Errorf("building HTTP client: %w", err)
+	}
+
+	resp, err := client.Get(url) //nolint:gosec // URL is constructed from server-supplied base URL
 	if err != nil {
 		tmp.Close()
 		return fmt.Errorf("downloading update: %w", err)
@@ -97,4 +111,30 @@ func Update(latestVersion, downloadBaseURL string) error {
 		return fmt.Errorf("re-execing updated agent: %w", err)
 	}
 	return nil // unreachable on unix (syscall.Exec replaces the process)
+}
+
+// buildHTTPClient returns an HTTP client whose TLS config trusts both the
+// system CA pool and the supplied pinned cert PEM. When pinnedPEM is empty,
+// the client falls back to the system pool alone. A modest timeout keeps a
+// hung connection from blocking the agent indefinitely.
+func buildHTTPClient(pinnedPEM []byte) (*http.Client, error) {
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+
+	roots, err := x509.SystemCertPool()
+	if err != nil || roots == nil {
+		roots = x509.NewCertPool()
+	}
+	if len(pinnedPEM) > 0 {
+		if !roots.AppendCertsFromPEM(pinnedPEM) {
+			slog.Warn("pinned server cert PEM contained no valid certificates — falling back to system trust only")
+		}
+	}
+	tr.TLSClientConfig = &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		RootCAs:    roots,
+	}
+	return &http.Client{
+		Transport: tr,
+		Timeout:   10 * time.Minute,
+	}, nil
 }

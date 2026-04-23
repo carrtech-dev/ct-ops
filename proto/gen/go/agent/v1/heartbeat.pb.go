@@ -798,8 +798,16 @@ type HeartbeatRequest struct {
 	QueryResults      []*AgentQueryResult    `protobuf:"bytes,14,rep,name=query_results,json=queryResults,proto3" json:"query_results,omitempty"`
 	TaskProgress      []*AgentTaskProgress   `protobuf:"bytes,15,rep,name=task_progress,json=taskProgress,proto3" json:"task_progress,omitempty"`
 	TaskResults       []*AgentTaskResult     `protobuf:"bytes,16,rep,name=task_results,json=taskResults,proto3" json:"task_results,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// SHA-256 hex fingerprint of the server cert the agent currently trusts
+	// for HTTPS self-update downloads. Empty when the agent has no pin yet
+	// (e.g. pre-upgrade agent) or uses only the system trust store.
+	// The ingest service compares this against the live nginx server cert;
+	// on mismatch, it returns the current cert in pending_server_cert_pem so
+	// the agent can continue to verify downloads after an operator swap
+	// without manual CA distribution on each agent host.
+	PinnedServerCertFingerprint string `protobuf:"bytes,17,opt,name=pinned_server_cert_fingerprint,json=pinnedServerCertFingerprint,proto3" json:"pinned_server_cert_fingerprint,omitempty"`
+	unknownFields               protoimpl.UnknownFields
+	sizeCache                   protoimpl.SizeCache
 }
 
 func (x *HeartbeatRequest) Reset() {
@@ -944,6 +952,13 @@ func (x *HeartbeatRequest) GetTaskResults() []*AgentTaskResult {
 	return nil
 }
 
+func (x *HeartbeatRequest) GetPinnedServerCertFingerprint() string {
+	if x != nil {
+		return x.PinnedServerCertFingerprint
+	}
+	return ""
+}
+
 type HeartbeatResponse struct {
 	state                   protoimpl.MessageState    `protogen:"open.v1"`
 	Ok                      bool                      `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
@@ -966,8 +981,13 @@ type HeartbeatResponse struct {
 	// Agent CA cert bundle (PEM). Sent alongside a pending cert or when the CA
 	// has rotated — the agent stashes this so it can display the chain.
 	AgentCaCertPem string `protobuf:"bytes,15,opt,name=agent_ca_cert_pem,json=agentCaCertPem,proto3" json:"agent_ca_cert_pem,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// PEM of the nginx-facing server cert currently in force on the server.
+	// Populated only when the agent's pinned_server_cert_fingerprint differs
+	// from the live cert. The agent persists this to its data dir and appends
+	// it to the trust roots used by the self-update HTTP client.
+	PendingServerCertPem string `protobuf:"bytes,16,opt,name=pending_server_cert_pem,json=pendingServerCertPem,proto3" json:"pending_server_cert_pem,omitempty"`
+	unknownFields        protoimpl.UnknownFields
+	sizeCache            protoimpl.SizeCache
 }
 
 func (x *HeartbeatResponse) Reset() {
@@ -1105,6 +1125,13 @@ func (x *HeartbeatResponse) GetAgentCaCertPem() string {
 	return ""
 }
 
+func (x *HeartbeatResponse) GetPendingServerCertPem() string {
+	if x != nil {
+		return x.PendingServerCertPem
+	}
+	return ""
+}
+
 var File_agent_v1_heartbeat_proto protoreflect.FileDescriptor
 
 const file_agent_v1_heartbeat_proto_rawDesc = "" +
@@ -1179,7 +1206,7 @@ const file_agent_v1_heartbeat_proto_rawDesc = "" +
 	"\texit_code\x18\x03 \x01(\x05R\bexitCode\x12\x1f\n" +
 	"\vresult_json\x18\x04 \x01(\tR\n" +
 	"resultJson\x12\x14\n" +
-	"\x05error\x18\x05 \x01(\tR\x05error\"\xc0\x05\n" +
+	"\x05error\x18\x05 \x01(\tR\x05error\"\x85\x06\n" +
 	"\x10HeartbeatRequest\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1f\n" +
 	"\vcpu_percent\x18\x02 \x01(\x02R\n" +
@@ -1199,7 +1226,8 @@ const file_agent_v1_heartbeat_proto_rawDesc = "" +
 	"\rcheck_results\x18\r \x03(\v2\x15.agent.v1.CheckResultR\fcheckResults\x12?\n" +
 	"\rquery_results\x18\x0e \x03(\v2\x1a.agent.v1.AgentQueryResultR\fqueryResults\x12@\n" +
 	"\rtask_progress\x18\x0f \x03(\v2\x1b.agent.v1.AgentTaskProgressR\ftaskProgress\x12<\n" +
-	"\ftask_results\x18\x10 \x03(\v2\x19.agent.v1.AgentTaskResultR\vtaskResults\"\xf2\x05\n" +
+	"\ftask_results\x18\x10 \x03(\v2\x19.agent.v1.AgentTaskResultR\vtaskResults\x12C\n" +
+	"\x1epinned_server_cert_fingerprint\x18\x11 \x01(\tR\x1bpinnedServerCertFingerprint\"\xa9\x06\n" +
 	"\x11HeartbeatResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x18\n" +
 	"\acommand\x18\x02 \x01(\tR\acommand\x12'\n" +
@@ -1216,7 +1244,8 @@ const file_agent_v1_heartbeat_proto_rawDesc = "" +
 	"\x18cancel_terminal_sessions\x18\f \x03(\tR\x16cancelTerminalSessions\x125\n" +
 	"\x17pending_client_cert_pem\x18\r \x01(\tR\x14pendingClientCertPem\x12I\n" +
 	"\"pending_client_cert_not_after_unix\x18\x0e \x01(\x03R\x1dpendingClientCertNotAfterUnix\x12)\n" +
-	"\x11agent_ca_cert_pem\x18\x0f \x01(\tR\x0eagentCaCertPemB7Z5github.com/carrtech-dev/ct-ops/proto/agent/v1;agentv1b\x06proto3"
+	"\x11agent_ca_cert_pem\x18\x0f \x01(\tR\x0eagentCaCertPem\x125\n" +
+	"\x17pending_server_cert_pem\x18\x10 \x01(\tR\x14pendingServerCertPemB7Z5github.com/carrtech-dev/ct-ops/proto/agent/v1;agentv1b\x06proto3"
 
 var (
 	file_agent_v1_heartbeat_proto_rawDescOnce sync.Once

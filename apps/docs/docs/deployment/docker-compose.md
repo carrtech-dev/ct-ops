@@ -29,7 +29,7 @@ nano .env
 ./start.sh
 ```
 
-When `docker compose ps` shows all containers as `healthy`, open the web UI at `http://<your-server>:3000`.
+When `docker compose ps` shows all containers as `healthy`, open the web UI at `https://<your-server>`. The bundle ships a self-signed certificate — your browser will warn on first visit. To replace it with a certificate from your own CA, see [Replacing the TLS certificate](#replacing-the-tls-certificate) below.
 
 ---
 
@@ -54,8 +54,9 @@ POSTGRES_USER=ct-ops
 POSTGRES_PASSWORD=change-me
 POSTGRES_DB=ct-ops
 BETTER_AUTH_SECRET=change-me-to-a-long-random-string
-BETTER_AUTH_URL=http://localhost:3000
-BETTER_AUTH_TRUSTED_ORIGINS=http://localhost:3000
+BETTER_AUTH_URL=https://ct-ops.example.com
+BETTER_AUTH_TRUSTED_ORIGINS=https://ct-ops.example.com
+AGENT_DOWNLOAD_BASE_URL=https://ct-ops.example.com
 EOF
 ```
 
@@ -63,18 +64,18 @@ EOF
 Change `BETTER_AUTH_SECRET` before going to production. Use at least 32 random characters.
 :::
 
-### 3. Generate TLS certificates for the ingest service
+### 3. Generate TLS certificates
 
-```bash
-mkdir -p deploy/dev-tls
-openssl req -x509 -newkey rsa:4096 -keyout deploy/dev-tls/server.key \
-  -out deploy/dev-tls/server.crt -days 365 -nodes \
-  -subj "/CN=ct-ops-ingest"
-```
+`start.sh` generates two self-signed certificates on first run:
 
-The dev certificate above expires in 365 days — long enough for laptops to keep working between rebuilds, short enough that an accidental production deployment fails loudly within a year. **Do not extend the `-days` value** to avoid the renewal: the short lifetime is the safety net.
+| Purpose | Path | Consumed by |
+|---|---|---|
+| Agent gRPC (mTLS on :9443) | `deploy/dev-tls/server.{crt,key}` | ingest container |
+| Browser HTTPS (:443) | `deploy/tls/server.{crt,key}` | bundled nginx container |
 
-For production, use a certificate from your corporate CA or Let's Encrypt and rotate it on the schedule your CA issues — typical lifetimes are 90 days (Let's Encrypt) to 1 year (corporate CAs). Re-running `start.sh` will not regenerate certificates that already exist on disk; production rotation is your operational responsibility.
+Both certs are RSA 4096-bit with a 365-day lifetime and SANs for `localhost`, the docker-internal hostname, and every non-loopback IPv4 the host is currently using. Short expiry is deliberate — if you forget to rotate, the stack fails loudly within a year. If you are deploying manually, run `./deploy/scripts/gen-server-cert.sh` with `OUT_DIR=deploy/tls` and again with `OUT_DIR=deploy/dev-tls` `CN=ct-ops-ingest` before `docker compose up`.
+
+For production, replace the generated cert files with ones from your own CA — see [Replacing the TLS certificate](#replacing-the-tls-certificate). Re-running `start.sh` will not overwrite certificates that already exist on disk.
 
 ### 4. Start the stack
 
@@ -94,11 +95,19 @@ The web container runs database migrations automatically on first start. Once yo
 
 ## Services
 
-| Service | Image | Port(s) | Description |
+| Service | Image | Host ports | Description |
 |---|---|---|---|
-| `db` | `timescale/timescaledb:latest-pg16` | 5432 | PostgreSQL + TimescaleDB |
-| `web` | `ghcr.io/carrtech-dev/ct-ops/web:latest` | 3000 | Next.js web app |
-| `ingest` | `ghcr.io/carrtech-dev/ct-ops/ingest:latest` | 9443, 8080 | gRPC ingest + JWKS |
+| `nginx` | `nginx:1.27-alpine` | **443**, **80** | TLS terminator for browser traffic |
+| `db` | `timescale/timescaledb:latest-pg16` | 127.0.0.1:5432 | PostgreSQL + TimescaleDB |
+| `web` | `ghcr.io/carrtech-dev/ct-ops/web:latest` | 127.0.0.1:3000 | Next.js web app (reached via nginx) |
+| `ingest` | `ghcr.io/carrtech-dev/ct-ops/ingest:latest` | **9443**, 127.0.0.1:8080 | Agent gRPC (:9443 direct, bypasses nginx) + JWKS on loopback |
+
+Only `443`, `80`, and `9443` are published on all host interfaces:
+
+- `443` / `80` — browser traffic (nginx terminates TLS; `80` redirects to `443`).
+- `9443` — agent gRPC with mTLS. Agents connect direct to the ingest container; the proxy is intentionally skipped so client-cert verification is never terminated mid-hop.
+
+The remaining ports are bound to `127.0.0.1` only, so `web:3000`, `ingest:8080`, and Postgres are reachable from the host (for debugging over SSH tunnels) but not from the network. Override the nginx ports with `NGINX_HTTPS_PORT` / `NGINX_HTTP_PORT` in `.env` if 80/443 are already in use.
 
 ---
 
@@ -143,26 +152,21 @@ docker compose -f docker-compose.single.yml down -v
 
 ---
 
-## Reverse Proxy
+## Replacing the TLS certificate
 
-To expose the web UI on port 443 with TLS termination, add nginx or Caddy in front:
+The bundled nginx serves `deploy/tls/server.crt` + `deploy/tls/server.key` on port 443. To replace the self-signed cert with one from your own CA:
 
-```nginx title="nginx.conf (example)"
-server {
-    listen 443 ssl;
-    server_name ct-ops.corp.example.com;
+```bash
+# Copy your cert and key into place (overwrite the auto-generated files).
+install -m 0644 /path/to/your.crt deploy/tls/server.crt
+install -m 0600 /path/to/your.key deploy/tls/server.key
 
-    ssl_certificate     /etc/ssl/ct-ops.crt;
-    ssl_certificate_key /etc/ssl/ct-ops.key;
-
-    location / {
-        proxy_pass http://localhost:3000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
+# Restart only the nginx container — web, ingest, and agents keep running.
+docker compose restart nginx
 ```
 
-Update `BETTER_AUTH_URL` and `BETTER_AUTH_TRUSTED_ORIGINS` in `.env` to reflect the public HTTPS URL.
+No rebuild is required. On the next heartbeat, every connected agent's pinned fingerprint will mismatch the new cert, and the ingest service pushes the new cert down the mTLS-protected heartbeat stream. The agent persists it to its data dir and uses it as an additional trust anchor for self-update downloads. This means operators can rotate the browser cert without touching any agent host, even on Linux VMs where the internal CA is not installed in the system trust store.
+
+## Fronting with your own reverse proxy
+
+If you prefer to use an existing load balancer or TLS terminator (e.g. a corporate HAProxy, an F5, or Cloudflare Tunnel), stop the bundled nginx and point your proxy at `127.0.0.1:3000` (web) and `127.0.0.1:8080` (ingest WebSocket terminal). Leave port 9443 as a straight passthrough — agent mTLS must not be terminated. Update `BETTER_AUTH_URL`, `BETTER_AUTH_TRUSTED_ORIGINS`, and `AGENT_DOWNLOAD_BASE_URL` to match the URL your proxy serves.

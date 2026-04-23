@@ -9,7 +9,8 @@ services:
     volumes:
       - db_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      # Loopback-only — nothing outside this host speaks to Postgres directly.
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ctops -d ctops"]
       interval: 10s
@@ -26,22 +27,34 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "3000:3000"
+      # Loopback-only — browser traffic flows in via the nginx container on :443.
+      # Keeping :3000 on 127.0.0.1 lets operators tunnel for debugging without
+      # exposing plaintext HTTP externally.
+      - "127.0.0.1:3000:3000"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-ctops}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/${POSTGRES_DB:-ctops}
       BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET must be set in your .env file}
-      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-http://localhost:3000}
-      BETTER_AUTH_TRUSTED_ORIGINS: ${BETTER_AUTH_TRUSTED_ORIGINS:-http://localhost:3000}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:-https://localhost}
+      BETTER_AUTH_TRUSTED_ORIGINS: ${BETTER_AUTH_TRUSTED_ORIGINS:-https://localhost}
       NODE_ENV: production
       AGENT_DIST_DIR: /var/lib/ct-ops/agent-dist
-      AGENT_DOWNLOAD_BASE_URL: ${AGENT_DOWNLOAD_BASE_URL:-http://localhost:3000}
-      # Leave INGEST_WS_URL blank when running behind a reverse proxy or
-      # Cloudflare tunnel — the browser will use the page's own origin and
-      # the proxy must route /ws/terminal/* to the ingest container on 8080.
-      INGEST_WS_URL: ${INGEST_WS_URL-ws://localhost:8080}
+      AGENT_DOWNLOAD_BASE_URL: ${AGENT_DOWNLOAD_BASE_URL:-https://localhost}
+      # Empty by default so the browser uses the page's own origin and nginx
+      # routes /ws/terminal/* to the ingest container. Override with an
+      # absolute wss:// URL only if you intentionally want the browser to
+      # bypass nginx and connect to ingest directly.
+      INGEST_WS_URL: ${INGEST_WS_URL-}
+      # Path to the nginx-facing server cert. The enrolment bundle route reads
+      # this file and ships it to agents so they can verify the HTTPS URL used
+      # for self-update downloads, even when it is signed by a private CA not
+      # in the agent host's trust store.
+      WEB_TLS_CERT: /var/lib/ct-ops/server-tls/server.crt
       CT_OPS_LOADTEST_ADMIN_KEY: ${CT_OPS_LOADTEST_ADMIN_KEY:-}
     volumes:
       - agent_dist:/var/lib/ct-ops/agent-dist
+      # Read-only mount of the nginx-facing server cert so the enrolment
+      # bundle route can embed it in agent downloads.
+      - ./deploy/tls:/var/lib/ct-ops/server-tls:ro
 
   ingest:
     image: ${INGEST_IMAGE:-ghcr.io/carrtech-dev/ct-ops/ingest:latest}
@@ -53,8 +66,10 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "9443:9443"   # gRPC (TLS)
-      - "8080:8080"   # JWKS + healthz HTTP
+      - "9443:9443"   # gRPC (mTLS) — agents connect here directly, bypassing nginx.
+      # Loopback-only — nginx reaches :8080 over the docker network; there is
+      # no reason to expose plaintext JWKS/healthz/WS externally.
+      - "127.0.0.1:8080:8080"
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-ctops}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@db:5432/${POSTGRES_DB:-ctops}
       INGEST_TLS_CERT: /etc/ct-ops/tls/server.crt
@@ -70,21 +85,45 @@ services:
       LDAP_ENCRYPTION_KEY: ${LDAP_ENCRYPTION_KEY:-${BETTER_AUTH_SECRET:?BETTER_AUTH_SECRET must be set}}
       # Public base URL of the web app — agents construct their download URL
       # from this, so it must be reachable from the agent host (not just from
-      # inside the docker network). Override via .env / start.sh for remote
-      # agents; defaults to localhost for single-host dev.
-      INGEST_AGENT_DOWNLOAD_BASE_URL: ${AGENT_DOWNLOAD_BASE_URL:-http://localhost:3000}
+      # inside the docker network). Defaults to the nginx TLS endpoint.
+      INGEST_AGENT_DOWNLOAD_BASE_URL: ${AGENT_DOWNLOAD_BASE_URL:-https://localhost}
+      # Path to the nginx-facing server cert. Ingest reads this so it can
+      # compare the fingerprint an agent sends in its heartbeat against the
+      # current live cert — when they differ, ingest pushes the new cert down
+      # the heartbeat stream so the agent can keep verifying downloads after
+      # the operator swaps in a new cert without re-enrolling every host.
+      INGEST_WEB_SERVER_CERT: /etc/ct-ops/server-tls/server.crt
       # The release-please manifest is baked into the ingest image at build
       # time (see apps/ingest/Dockerfile) and INGEST_RELEASE_MANIFEST_PATH is
       # set there as well, so production users running from GHCR do not need
       # a source checkout for the agent version to be discovered.
     volumes:
       - ./deploy/dev-tls:/etc/ct-ops/tls:ro
+      - ./deploy/tls:/etc/ct-ops/server-tls:ro
       - ingest_data:/var/lib/ct-ops
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
       interval: 10s
       timeout: 5s
       retries: 5
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      - web
+      - ingest
+    ports:
+      - "${NGINX_HTTPS_PORT:-443}:443"
+      - "${NGINX_HTTP_PORT:-80}:80"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/tls:/etc/nginx/tls:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/nginx-healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
 volumes:
   db_data:

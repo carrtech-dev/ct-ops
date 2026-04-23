@@ -23,6 +23,15 @@ export interface BundleOptions {
    * unnecessary even for self-signed dev setups.
    */
   serverCaPem?: string
+  /**
+   * PEM-encoded nginx-facing server cert. When provided the zip ships a
+   * server-cert.pem file and the install script copies it into the agent
+   * data dir at /var/lib/ct-ops/agent/server_cert.pem so the self-update
+   * HTTP client can verify the HTTPS download URL even when the cert is
+   * signed by a private CA not in the host trust store. The ingest service
+   * rotates this pin over heartbeat when the operator swaps the cert.
+   */
+  webServerCertPem?: string
 }
 
 function escapeToml(s: string): string {
@@ -96,6 +105,14 @@ export async function buildInstallBundle(opts: BundleOptions): Promise<{
   // without --tls-skip-verify in production installs.
   if (opts.serverCaPem) {
     root.file('server-ca.crt', opts.serverCaPem, { unixPermissions: 0o644 })
+  }
+
+  // Ship the nginx-facing server cert so the agent can pin it for HTTPS
+  // self-update verification. Cheap on wire; the install script copies it
+  // into the data dir. Rotation over heartbeat replaces the pin when the
+  // operator swaps the cert at deploy/tls/server.crt.
+  if (opts.webServerCertPem) {
+    root.file('server-cert.pem', opts.webServerCertPem, { unixPermissions: 0o644 })
   }
 
   // Install script(s)
@@ -174,6 +191,16 @@ function renderUnixInstallScript(opts: BundleOptions): string {
 fi
 `
 
+  const pinServerCert = opts.webServerCertPem
+    ? `# Pin the nginx-facing server cert so the self-update HTTP client can
+# verify the HTTPS download URL without relying on the OS trust store. The
+# server rotates this pin over heartbeat when the cert changes, so operators
+# can swap certs without re-enrolling any agent.
+install -d -m 0755 /var/lib/ct-ops/agent
+install -m 0644 "$DIR/server-cert.pem" /var/lib/ct-ops/agent/server_cert.pem
+`
+    : ''
+
   return `#!/bin/sh
 # CT-Ops agent offline install — ${opts.os}/${opts.arch}
 # Run from the extracted bundle directory:
@@ -199,7 +226,7 @@ fi
 
 chmod +x "\$BINARY"
 
-echo "Installing ct-ops-agent..."
+${pinServerCert}echo "Installing ct-ops-agent..."
 "\$BINARY" --install --token ${tokenArg} --address "${opts.ingestAddress}"${tlsFlag}${renderUnixTagFlags(opts.tags)}
 `
 }
@@ -216,6 +243,15 @@ function renderWindowsInstallScript(opts: BundleOptions): string {
   exit 1
 }
 `
+
+  const pinServerCert = opts.webServerCertPem
+    ? `# Pin the nginx-facing server cert for self-update verification.
+$DataDir = "C:\\ProgramData\\ct-ops\\agent"
+if (-not (Test-Path $DataDir)) { New-Item -ItemType Directory -Path $DataDir | Out-Null }
+Copy-Item -Force (Join-Path $ScriptDir "server-cert.pem") (Join-Path $DataDir "server_cert.pem")
+
+`
+    : ''
 
   return `# CT-Ops agent offline install — windows/${opts.arch}
 # Run from an elevated PowerShell session in the extracted bundle directory:
@@ -239,7 +275,7 @@ if ($expected -ne $actual) {
 }
 Write-Host "Checksum OK."
 
-Write-Host "Installing ct-ops-agent..."
+${pinServerCert}Write-Host "Installing ct-ops-agent..."
 & $Binary --install --token ${tokenExpr} --address "${opts.ingestAddress}"${tlsFlag}${renderWindowsTagFlags(opts.tags)}
 `
 }

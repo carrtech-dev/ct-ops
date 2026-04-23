@@ -30,10 +30,11 @@ type HeartbeatHandler struct {
 	downloadBaseURL string
 	terminalStore   *TerminalStore
 	ca              *pki.AgentCA
+	webServerCert   *pki.WebServerCert
 }
 
 // NewHeartbeatHandler creates a HeartbeatHandler.
-func NewHeartbeatHandler(pool *pgxpool.Pool, issuer *auth.JWTIssuer, pub queue.Publisher, versionPoller *config.VersionPoller, downloadBaseURL string, terminalStore *TerminalStore, ca *pki.AgentCA) *HeartbeatHandler {
+func NewHeartbeatHandler(pool *pgxpool.Pool, issuer *auth.JWTIssuer, pub queue.Publisher, versionPoller *config.VersionPoller, downloadBaseURL string, terminalStore *TerminalStore, ca *pki.AgentCA, webServerCert *pki.WebServerCert) *HeartbeatHandler {
 	return &HeartbeatHandler{
 		pool:            pool,
 		issuer:          issuer,
@@ -42,6 +43,7 @@ func NewHeartbeatHandler(pool *pgxpool.Pool, issuer *auth.JWTIssuer, pub queue.P
 		downloadBaseURL: downloadBaseURL,
 		terminalStore:   terminalStore,
 		ca:              ca,
+		webServerCert:   webServerCert,
 	}
 }
 
@@ -466,6 +468,17 @@ func (h *HeartbeatHandler) processHeartbeat(
 	}
 
 	resp := &agentv1.HeartbeatResponse{Ok: true}
+
+	// If the agent's pinned server cert fingerprint doesn't match the live
+	// nginx cert, push the current PEM so the agent can append it to its
+	// self-update trust roots. This keeps HTTPS download verification working
+	// after an operator rotates deploy/tls/server.{crt,key} without touching
+	// each agent host. Empty webServerCert disables the rotation RPC.
+	if h.webServerCert != nil {
+		if fp := h.webServerCert.Fingerprint(); fp != "" && fp != req.PinnedServerCertFingerprint {
+			resp.PendingServerCertPem = h.webServerCert.PEM()
+		}
+	}
 
 	// Signal an update when the agent is running a different version than the
 	// latest known version, and the agent is not a dev build.

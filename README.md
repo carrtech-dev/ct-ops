@@ -10,7 +10,7 @@ CT-Ops is an open-source monitoring and operations platform designed to run **en
 
 ## Features
 
-- **Agent-based host monitoring** — lightweight Go agent, single binary, communicates over gRPC/mTLS on port 443. No firewall exceptions needed.
+- **Agent-based host monitoring** — lightweight Go agent, single binary, communicates over gRPC/mTLS on port 9443. Browser traffic terminates TLS on 443 via a bundled nginx container.
 - **Real-time metrics** — CPU, memory, disk, and network graphs backed by TimescaleDB, visible seconds after agent enrolment.
 - **Alerting & notification routing** — rule-based alerts with configurable thresholds and multi-channel notification delivery.
 - **Certificate lifecycle management** — inspect, validate, and track X.509 certificates from URL or file upload. Expiry alerts built in.
@@ -45,7 +45,7 @@ $EDITOR .env
 ./start.sh
 ```
 
-Open `http://localhost:3000` (or the domain you configured) to complete setup.
+Open `https://localhost` (or the domain you configured) to complete setup. Your browser will warn about the self-signed certificate on first visit — accept it, or drop a real cert into `deploy/tls/server.{crt,key}` and restart the `nginx` container.
 
 To pin a specific version:
 

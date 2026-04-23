@@ -111,6 +111,14 @@ message HeartbeatRequest {
   repeated AgentQueryResult  query_results      = 14;
   repeated AgentTaskProgress task_progress      = 15;
   repeated AgentTaskResult   task_results       = 16;
+  // SHA-256 hex fingerprint of the server cert the agent currently trusts
+  // for HTTPS self-update downloads. Empty when the agent has no pin yet
+  // (e.g. pre-upgrade agent) or uses only the system trust store.
+  // The ingest service compares this against the live nginx server cert;
+  // on mismatch, it returns the current cert in pending_server_cert_pem so
+  // the agent can continue to verify downloads after an operator swap
+  // without manual CA distribution on each agent host.
+  string pinned_server_cert_fingerprint = 17;
 }
 
 message HeartbeatResponse {
@@ -134,4 +142,9 @@ message HeartbeatResponse {
   // Agent CA cert bundle (PEM). Sent alongside a pending cert or when the CA
   // has rotated — the agent stashes this so it can display the chain.
   string agent_ca_cert_pem = 15;
+  // PEM of the nginx-facing server cert currently in force on the server.
+  // Populated only when the agent's pinned_server_cert_fingerprint differs
+  // from the live cert. The agent persists this to its data dir and appends
+  // it to the trust roots used by the self-update HTTP client.
+  string pending_server_cert_pem = 16;
 }
