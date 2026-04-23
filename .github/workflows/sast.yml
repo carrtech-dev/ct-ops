@@ -75,10 +75,27 @@ jobs:
             --config p/owasp-top-ten \
             --config p/secrets \
             --exclude-rule javascript.node-crypto.security.gcm-no-tag-length.gcm-no-tag-length \
+            --exclude-rule generic.nginx.security.request-host-used.request-host-used \
+            --exclude-rule generic.nginx.security.possible-h2c-smuggling.possible-nginx-h2c-smuggling \
             --sarif --output=semgrep.sarif
           # gcm-no-tag-length excluded above: lib/crypto/encrypt.ts uses explicit
           # tag.length !== TAG_LENGTH guards; setAuthTagLength is absent from this
           # Node.js version so the API-based fix is not available.
+          #
+          # request-host-used excluded: deploy/nginx/nginx.conf proxies $host to
+          # the backend. Security-sensitive URLs (auth callbacks, cookie Secure/
+          # Domain, trusted origins) derive from BETTER_AUTH_URL and
+          # BETTER_AUTH_TRUSTED_ORIGINS env vars, not the Host header, so a
+          # spoofed Host cannot forge sessions. The HTTPS redirect using $host
+          # only redirects the attacker's own browser. Inline nosemgrep comments
+          # document each occurrence.
+          #
+          # possible-nginx-h2c-smuggling excluded: the rule pattern-matches any
+          # `proxy_set_header Connection` without reading the value. On non-WS
+          # locations we explicitly clear Upgrade/Connection to "" (the rule's
+          # own recommended mitigation), and on /ws/terminal/ Upgrade is forced
+          # to a literal `websocket` with a map that only translates websocket
+          # to Connection: upgrade — h2c and other values map to empty.
 
       - name: Upload SARIF
         if: always()
