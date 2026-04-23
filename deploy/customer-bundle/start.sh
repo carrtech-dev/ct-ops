@@ -174,42 +174,114 @@ check_env() {
   done
 }
 
-ensure_tls_certs() {
-  CERT_DIR="$SCRIPT_DIR/deploy/dev-tls"
-  if [ -f "$CERT_DIR/server.crt" ] && [ -f "$CERT_DIR/server.key" ]; then
+gen_cert() {
+  # Run the shared generator inline rather than shelling out to a file that
+  # may not be present in every bundle layout. Keeps the customer bundle
+  # self-contained.
+  #
+  # Args: $1 = OUT_DIR, $2 = CN
+  local out_dir="$1"
+  local cn="$2"
+
+  if [ -f "$out_dir/server.crt" ] && [ -f "$out_dir/server.key" ]; then
     return 0
   fi
   if ! command -v openssl >/dev/null 2>&1; then
-    echo "ERROR: 'openssl' is required to generate the ingest TLS certificate." >&2
+    echo "ERROR: 'openssl' is required to generate TLS certificates." >&2
     exit 1
   fi
-  echo "Generating ingest TLS certificate (dev-grade, 365-day expiry)..."
-  mkdir -p "$CERT_DIR"
+  mkdir -p "$out_dir"
 
+  local local_ips=""
   if command -v ip >/dev/null 2>&1; then
-    LOCAL_IPS=$(ip -4 addr show scope global 2>/dev/null | awk '/inet / {split($2,a,"/"); print "IP:" a[1]}' | tr '\n' ',' | sed 's/,$//')
-  else
-    LOCAL_IPS=$(ifconfig 2>/dev/null | awk '/inet / && !/127\.0\.0\.1/ {print "IP:" $2}' | tr '\n' ',' | sed 's/,$//')
+    local_ips=$(ip -4 addr show scope global 2>/dev/null | awk '/inet / {split($2,a,"/"); print "IP:" a[1]}' | tr '\n' ',' | sed 's/,$//' || true)
+  elif command -v ifconfig >/dev/null 2>&1; then
+    local_ips=$(ifconfig 2>/dev/null | awk '/inet / && !/127\.0\.0\.1/ {print "IP:" $2}' | tr '\n' ',' | sed 's/,$//' || true)
   fi
-  SAN="DNS:ingest,DNS:localhost,IP:127.0.0.1"
-  [ -n "$LOCAL_IPS" ] && SAN="${SAN},${LOCAL_IPS}"
+  local san="DNS:ingest,DNS:localhost,IP:127.0.0.1"
+  [ -n "$local_ips" ] && san="${san},${local_ips}"
 
   openssl req -x509 -newkey rsa:4096 \
-    -keyout "$CERT_DIR/server.key" \
-    -out "$CERT_DIR/server.crt" \
+    -keyout "$out_dir/server.key" \
+    -out "$out_dir/server.crt" \
     -sha256 -days 365 -nodes \
-    -subj "/CN=ct-ops-ingest" \
-    -addext "subjectAltName=${SAN}" 2>/dev/null
-  echo "TLS certificate written to ${CERT_DIR} (SANs: ${SAN})."
+    -subj "/CN=${cn}" \
+    -addext "subjectAltName=${san}" 2>/dev/null
+  chmod 600 "$out_dir/server.key"
+  chmod 644 "$out_dir/server.crt"
+  echo "Wrote ${out_dir}/server.{crt,key} (CN=${cn}, SANs: ${san})"
+}
+
+ensure_tls_certs() {
+  # Ingest mTLS cert — consumed by the gRPC listener on :9443.
+  if [ ! -f "$SCRIPT_DIR/deploy/dev-tls/server.crt" ] || [ ! -f "$SCRIPT_DIR/deploy/dev-tls/server.key" ]; then
+    echo "Generating ingest TLS certificate (self-signed, 365-day expiry)..."
+    gen_cert "$SCRIPT_DIR/deploy/dev-tls" "ct-ops-ingest"
+  fi
+
+  # Browser-facing server cert — consumed by the bundled nginx on :443.
+  # If both files exist we skip generation regardless of origin, so operators
+  # can pre-seed a real cert into deploy/tls/ before the first install.
+  if [ ! -f "$SCRIPT_DIR/deploy/tls/server.crt" ] || [ ! -f "$SCRIPT_DIR/deploy/tls/server.key" ]; then
+    echo "Generating nginx TLS certificate (self-signed, 365-day expiry)..."
+    gen_cert "$SCRIPT_DIR/deploy/tls" "ct-ops"
+    echo "Replace deploy/tls/server.crt and deploy/tls/server.key with your own"
+    echo "certificate at any time to remove the browser warning."
+  fi
+}
+
+# check_ports_free fails fast when :80 or :443 are already bound on the host,
+# pointing the operator at the NGINX_HTTPS_PORT / NGINX_HTTP_PORT overrides.
+check_ports_free() {
+  local https_port="${NGINX_HTTPS_PORT:-443}"
+  local http_port="${NGINX_HTTP_PORT:-80}"
+  local in_use=()
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:)${https_port}$" && in_use+=("${https_port}")
+    ss -ltn 2>/dev/null | awk '{print $4}' | grep -Eq "(^|:)${http_port}$"  && in_use+=("${http_port}")
+  fi
+  if [ ${#in_use[@]} -gt 0 ]; then
+    echo "ERROR: the following ports are already bound on this host: ${in_use[*]}" >&2
+    echo "  Either free them or override the nginx ports in .env:" >&2
+    echo "    NGINX_HTTPS_PORT=8443" >&2
+    echo "    NGINX_HTTP_PORT=8080" >&2
+    exit 1
+  fi
+}
+
+# warn_legacy_env emits a one-line notice for each http://localhost:3000-style
+# value carried over from a pre-nginx install. We do not rewrite .env —
+# operators who intentionally front CT-Ops with a different reverse proxy
+# would lose their config. See docs/getting-started/configuration.md.
+warn_legacy_env() {
+  local legacy=()
+  local var
+  for var in BETTER_AUTH_URL BETTER_AUTH_TRUSTED_ORIGINS AGENT_DOWNLOAD_BASE_URL; do
+    local val="${!var:-}"
+    if [ -n "$val" ] && [ "${val#http://}" != "$val" ]; then
+      legacy+=("$var=$val")
+    fi
+  done
+  if [ ${#legacy[@]} -gt 0 ]; then
+    echo ""
+    echo "NOTICE: .env contains plaintext HTTP values from a previous install:"
+    for entry in "${legacy[@]}"; do echo "  - $entry"; done
+    echo "The bundled nginx now terminates TLS on https://<host>. Update these"
+    echo "values to https:// URLs when you're ready. Not rewriting automatically"
+    echo "so operators fronting CT-Ops with a different proxy keep working."
+    echo ""
+  fi
 }
 
 start_stack() {
   require_docker
   check_env
+  warn_legacy_env
+  check_ports_free
   ensure_tls_certs
 
   echo "Pulling latest images from GHCR..."
-  if ! docker compose pull db web ingest; then
+  if ! docker compose pull db web ingest nginx; then
     echo "" >&2
     echo "ERROR: failed to pull one or more images from GHCR." >&2
     echo "  - Check your network access to ghcr.io" >&2
@@ -237,7 +309,9 @@ start_stack() {
   fi
 
   echo ""
-  echo "CT-Ops is starting. Open ${BETTER_AUTH_URL:-http://localhost:3000} in your browser."
+  echo "CT-Ops is starting. Open ${BETTER_AUTH_URL:-https://localhost} in your browser."
+  echo "Your browser will warn about the self-signed certificate on first visit — accept it"
+  echo "or replace deploy/tls/server.{crt,key} with a certificate from your own CA."
   echo "Tail logs with:  ./start.sh --logs"
   echo "Stop with:       ./start.sh --down"
 }

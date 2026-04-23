@@ -63,6 +63,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Load the browser-facing nginx TLS cert used by agents for self-update
+	// download verification. Refreshes every 30s so an operator swap is
+	// picked up without restarting ingest. When no path is configured the
+	// loader returns an empty value and the rotation RPC is a no-op.
+	webServerCert, err := pki.LoadWebServerCert(cfg.TLS.WebServerCertFile)
+	if err != nil {
+		slog.Warn("loading web server cert — rotation RPC disabled", "err", err)
+		webServerCert, _ = pki.LoadWebServerCert("")
+	}
+	go webServerCert.Run(ctx.Done(), 30*time.Second)
+
 	// Revocation set — in-memory; refreshed from DB on interval.
 	revocation, err := pki.NewRevocation(ctx, pool)
 	if err != nil {
@@ -97,7 +108,7 @@ func main() {
 	versionPoller := config.NewVersionPoller(cfg.Agent.LatestVersion, 5*time.Minute)
 	versionPoller.Start(ctx)
 	terminalStore := handlers.NewTerminalStore()
-	hbHandler := handlers.NewHeartbeatHandler(pool, issuer, q, versionPoller, cfg.Agent.DownloadBaseURL, terminalStore, agentCA)
+	hbHandler := handlers.NewHeartbeatHandler(pool, issuer, q, versionPoller, cfg.Agent.DownloadBaseURL, terminalStore, agentCA, webServerCert)
 	terminalHandler := handlers.NewTerminalHandler(pool, issuer, terminalStore)
 	terminalWSHandler := handlers.NewTerminalWSHandler(pool, terminalStore)
 	inventoryHandler := handlers.NewInventoryHandler(pool, issuer)

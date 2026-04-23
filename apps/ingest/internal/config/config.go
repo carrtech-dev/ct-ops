@@ -43,6 +43,12 @@ type TLSConfig struct {
 	// and stored there encrypted).
 	AgentCACertFile string `yaml:"agent_ca_cert_file"`
 	AgentCAKeyFile  string `yaml:"agent_ca_key_file"`
+	// WebServerCertFile points at the browser-facing nginx TLS cert that
+	// terminates HTTPS on :443. Ingest reads it so it can push updates down
+	// the heartbeat stream when the cert is swapped out, allowing agents to
+	// keep verifying their self-update download URL without operator action
+	// on each host. Empty disables the rotation RPC.
+	WebServerCertFile string `yaml:"web_server_cert_file"`
 }
 
 type JWTConfig struct {
@@ -171,5 +177,8 @@ func applyEnv(cfg *Config) {
 	}
 	if v := os.Getenv("INGEST_AGENT_CA_KEY"); v != "" {
 		cfg.TLS.AgentCAKeyFile = v
+	}
+	if v := os.Getenv("INGEST_WEB_SERVER_CERT"); v != "" {
+		cfg.TLS.WebServerCertFile = v
 	}
 }

@@ -37,9 +37,15 @@ To pin a specific version:
 CT_OPS_VERSION=v0.3.0 curl -fsSL ... | bash
 ```
 
-`start.sh` generates dev TLS certs, generates `BETTER_AUTH_SECRET` if blank, pulls images from GHCR, and starts the stack. Database migrations run inside the web container automatically on startup.
+`start.sh` generates:
 
-When all three containers show `healthy` in `docker compose ps`, continue to [Create your account](#create-your-account).
+- The ingest gRPC (mTLS) cert at `deploy/dev-tls/server.{crt,key}` — consumed by agents on port 9443.
+- The browser TLS cert at `deploy/tls/server.{crt,key}` — served by the bundled nginx on port 443.
+- `BETTER_AUTH_SECRET` and `POSTGRES_PASSWORD` if blank.
+
+It then pulls images from GHCR and starts the stack. Database migrations run inside the web container automatically on startup.
+
+When all containers show `healthy` in `docker compose ps`, continue to [Create your account](#create-your-account).
 
 ---
 
@@ -82,9 +88,10 @@ docker compose -f docker-compose.single.yml up -d
 ```
 
 This starts:
-- **`db`** — PostgreSQL + TimescaleDB on port 5432
-- **`web`** — Next.js web UI on port 3000
-- **`ingest`** — gRPC ingest service on port 9443, JWKS/healthz on port 8080
+- **`nginx`** — bundled TLS terminator on **ports 80 and 443**
+- **`db`** — PostgreSQL + TimescaleDB on port 5432 (loopback only)
+- **`web`** — Next.js web UI on port 3000 (loopback only — reach it via nginx on 443)
+- **`ingest`** — gRPC on **port 9443** (agents connect direct, bypassing nginx) + HTTP on 8080 (loopback only)
 
 ### 5. Run database migrations
 
@@ -96,7 +103,7 @@ docker compose -f docker-compose.single.yml exec web sh -c "cd /app && node_modu
 
 ## Create your account
 
-Open [http://localhost:3000](http://localhost:3000) in a browser.
+Open [https://localhost](https://localhost) in a browser. On first visit your browser will warn about the self-signed certificate — accept it to continue, or see [Replacing the TLS certificate](../deployment/docker-compose.md#replacing-the-tls-certificate) to install one from your own CA.
 
 1. Click **Register** and create your account
 2. Complete the **onboarding wizard** — enter your organisation name and click **Create Organisation**
@@ -165,7 +172,7 @@ level=INFO msg="heartbeat stream opened"
 
 ## Verify in the UI
 
-Open [http://localhost:3000/hosts](http://localhost:3000/hosts). Your host should appear with a green **Online** badge.
+Open [https://localhost/hosts](https://localhost/hosts). Your host should appear with a green **Online** badge.
 
 If you did **not** use auto-approve, the agent appears in the **Pending Approval** panel at the top of the Hosts page. Click **Approve** — the agent receives a JWT within 30 seconds and begins heartbeating.
 

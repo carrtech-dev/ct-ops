@@ -18,10 +18,11 @@ import { REQUIRED_AGENT_VERSION } from '@/lib/agent/version'
 import { readFile } from 'node:fs/promises'
 
 const SERVER_TLS_CERT_PATH = process.env['INGEST_TLS_CERT'] ?? '/etc/ct-ops/tls/server.crt'
+const WEB_TLS_CERT_PATH = process.env['WEB_TLS_CERT'] ?? '/var/lib/ct-ops/server-tls/server.crt'
 
-async function readServerCaPem(): Promise<string | undefined> {
+async function readPemFile(path: string): Promise<string | undefined> {
   try {
-    return await readFile(SERVER_TLS_CERT_PATH, 'utf-8')
+    return await readFile(path, 'utf-8')
   } catch {
     return undefined
   }
@@ -186,7 +187,8 @@ export async function POST(request: NextRequest) {
   const ingestAddress =
     parsed.data.ingestAddress?.trim() || `${host.split(':')[0]}:9443`
 
-  const serverCaPem = await readServerCaPem()
+  const serverCaPem = await readPemFile(SERVER_TLS_CERT_PATH)
+  const webServerCertPem = await readPemFile(WEB_TLS_CERT_PATH)
 
   const bundle = await buildInstallBundle({
     os: os as AgentOS,
@@ -200,6 +202,7 @@ export async function POST(request: NextRequest) {
     agentVersion: REQUIRED_AGENT_VERSION,
     tags: bundleTags,
     serverCaPem,
+    webServerCertPem,
   })
 
   return new NextResponse(new Uint8Array(bundle.zipBytes), {

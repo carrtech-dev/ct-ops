@@ -107,6 +107,14 @@ type Runner struct {
 	// received from the server. Used to restore checks after a stream reconnect
 	// if the executor has no running goroutines (e.g. after an agent restart).
 	lastKnownDefs []*agentv1.CheckDefinition
+
+	// pinnedServerCertMu guards pinnedServerCertPEM and pinnedServerCertFpr.
+	// These hold the nginx-facing server cert that agent self-update trusts in
+	// addition to the system CA pool. Values are persisted to disk whenever
+	// they change so a process restart picks up the same pin.
+	pinnedServerCertMu  sync.Mutex
+	pinnedServerCertPEM []byte
+	pinnedServerCertFpr string
 }
 
 // New creates a new heartbeat Runner. dialFunc is called once per stream
@@ -114,7 +122,7 @@ type Runner struct {
 // stream ends. dataDir and keypair enable mTLS cert rotation — when nil/empty
 // the runner skips cert-related work (useful for tests and load-test paths).
 func New(dialFunc func() (*grpc.ClientConn, error), agentID, jwtToken, version string, intervalSecs int, executor *checks.Executor, dataDir string, keypair *identity.Keypair) *Runner {
-	return &Runner{
+	r := &Runner{
 		dialFunc:     dialFunc,
 		agentID:      agentID,
 		jwtToken:     jwtToken,
@@ -129,6 +137,18 @@ func New(dialFunc func() (*grpc.ClientConn, error), agentID, jwtToken, version s
 		dataDir:         dataDir,
 		keypair:         keypair,
 	}
+	// Prime the pinned server cert from disk so the first heartbeat sends
+	// the correct fingerprint and a pre-re-exec self-update can trust the
+	// same PEM that was bundled at enrolment time.
+	if dataDir != "" {
+		if pem, fpr, err := identity.LoadPinnedServerCert(dataDir); err == nil {
+			r.pinnedServerCertPEM = pem
+			r.pinnedServerCertFpr = fpr
+		} else {
+			slog.Warn("loading pinned server cert", "err", err)
+		}
+	}
+	return r
 }
 
 // Run starts the heartbeat stream. It reconnects automatically on transient
@@ -359,6 +379,9 @@ func (r *Runner) handleResponse(ctx context.Context, resp *agentv1.HeartbeatResp
 			}
 		}
 	}
+	if resp.PendingServerCertPem != "" {
+		r.applyServerCertRotation(resp.PendingServerCertPem)
+	}
 	if resp.PendingClientCertPem != "" && r.dataDir != "" {
 		if err := identity.SaveClientCert(r.dataDir, []byte(resp.PendingClientCertPem)); err != nil {
 			slog.Warn("saving pushed client cert", "err", err)
@@ -380,7 +403,7 @@ func (r *Runner) handleResponse(ctx context.Context, resp *agentv1.HeartbeatResp
 			"current", r.version,
 			"latest", resp.LatestVersion,
 		)
-		if err := updater.Update(resp.LatestVersion, resp.DownloadUrl); err != nil {
+		if err := updater.Update(resp.LatestVersion, resp.DownloadUrl, r.pinnedServerCertBytes()); err != nil {
 			slog.Warn("self-update failed, continuing with current version", "err", err)
 		}
 		// If Update succeeds it re-execs and never returns.
@@ -580,28 +603,75 @@ func (r *Runner) refreshMetrics() {
 func (r *Runner) sendHeartbeat(stream agentv1.IngestService_HeartbeatClient) error {
 	m := r.cachedMetrics
 	req := &agentv1.HeartbeatRequest{
-		AgentId:           r.agentID,
-		CpuPercent:        m.cpu,
-		MemoryPercent:     m.memory,
-		DiskPercent:       m.disk,
-		UptimeSeconds:     m.uptime,
-		TimestampUnix:     time.Now().Unix(),
-		AgentVersion:      r.version,
-		OsVersion:         m.osVersion,
-		Os:                runtime.GOOS,
-		Arch:              runtime.GOARCH,
-		Disks:             m.disks,
-		NetworkInterfaces: m.nets,
-		CheckResults:      r.executor.DrainResults(),
-		QueryResults:      r.drainQueryResults(),
-		TaskProgress:      r.drainTaskProgress(),
-		TaskResults:       r.drainTaskResults(),
+		AgentId:                     r.agentID,
+		CpuPercent:                  m.cpu,
+		MemoryPercent:               m.memory,
+		DiskPercent:                 m.disk,
+		UptimeSeconds:               m.uptime,
+		TimestampUnix:               time.Now().Unix(),
+		AgentVersion:                r.version,
+		OsVersion:                   m.osVersion,
+		Os:                          runtime.GOOS,
+		Arch:                        runtime.GOARCH,
+		Disks:                       m.disks,
+		NetworkInterfaces:           m.nets,
+		CheckResults:                r.executor.DrainResults(),
+		QueryResults:                r.drainQueryResults(),
+		TaskProgress:                r.drainTaskProgress(),
+		TaskResults:                 r.drainTaskResults(),
+		PinnedServerCertFingerprint: r.currentPinnedFingerprint(),
 	}
 
 	if err := stream.Send(req); err != nil {
 		return fmt.Errorf("sending heartbeat: %w", err)
 	}
 	return nil
+}
+
+// currentPinnedFingerprint returns the fingerprint of the pinned server cert
+// the agent currently trusts for self-update downloads. Empty when no cert
+// is pinned (e.g. freshly enrolled agent before the first server push).
+func (r *Runner) currentPinnedFingerprint() string {
+	r.pinnedServerCertMu.Lock()
+	defer r.pinnedServerCertMu.Unlock()
+	return r.pinnedServerCertFpr
+}
+
+// pinnedServerCertBytes returns a copy of the pinned cert PEM for callers
+// that need trust material (e.g. the self-update HTTP client).
+func (r *Runner) pinnedServerCertBytes() []byte {
+	r.pinnedServerCertMu.Lock()
+	defer r.pinnedServerCertMu.Unlock()
+	if len(r.pinnedServerCertPEM) == 0 {
+		return nil
+	}
+	out := make([]byte, len(r.pinnedServerCertPEM))
+	copy(out, r.pinnedServerCertPEM)
+	return out
+}
+
+// applyServerCertRotation persists the pushed PEM to disk and updates the
+// in-memory pin so the next heartbeat advertises the new fingerprint and
+// the next self-update trusts the new chain.
+func (r *Runner) applyServerCertRotation(certPEM string) {
+	if certPEM == "" || r.dataDir == "" {
+		return
+	}
+	pemBytes := []byte(certPEM)
+	if err := identity.SavePinnedServerCert(r.dataDir, pemBytes); err != nil {
+		slog.Warn("persisting rotated server cert", "err", err)
+		return
+	}
+	_, fp, err := identity.LoadPinnedServerCert(r.dataDir)
+	if err != nil {
+		slog.Warn("reading rotated server cert after save", "err", err)
+		return
+	}
+	r.pinnedServerCertMu.Lock()
+	r.pinnedServerCertPEM = pemBytes
+	r.pinnedServerCertFpr = fp
+	r.pinnedServerCertMu.Unlock()
+	slog.Info("rotated pinned server cert", "fingerprint", fp)
 }
 
 // collectMetrics gathers all system metrics. Returns best-effort values;

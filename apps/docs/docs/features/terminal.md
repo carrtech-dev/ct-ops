@@ -108,19 +108,17 @@ Each terminal session authenticates using per-user credentials derived from the 
 
 ## Deployment: Reverse Proxies and Cloudflare Tunnels
 
-The terminal relies on a WebSocket connection from the browser to the ingest service on port `8080`. The `INGEST_WS_URL` environment variable controls which URL the browser uses.
+The single-node bundle ships an nginx container that already terminates TLS on `:443` and forwards `/ws/terminal/*` to the ingest service on `:8080` with the WebSocket upgrade header. For most operators there is nothing to configure — the browser opens `wss://<your-host>/ws/terminal/<id>` against the page's own origin and everything just works.
 
-There are two supported modes.
+Leave `INGEST_WS_URL` blank (the default) unless you intentionally want to bypass the bundled proxy.
 
-### Direct mode (default)
+### Fronting with your own reverse proxy
 
-`INGEST_WS_URL=ws://host:8080` (or `wss://host:8080`). The browser opens the WebSocket directly to that URL. This is the simplest setup for local/LAN deployments where the ingest port is reachable from every user's browser.
+If you stop the bundled nginx and terminate TLS with your own proxy (HAProxy, a corporate F5, Cloudflare Tunnel, etc.), route `/ws/terminal/*` to the ingest service on port `8080` and forward the HTTP Upgrade header. The snippets below are reference configs for common proxies; the bundled `deploy/nginx/nginx.conf` is a more complete example to copy from.
 
-### Same-origin mode (reverse proxy / Cloudflare tunnel)
+### Direct mode (bypass the proxy)
 
-Leave `INGEST_WS_URL` blank. The browser opens the WebSocket against the page's own origin, e.g. `wss://ct-ops.example.com/ws/terminal/<id>`. Your reverse proxy or tunnel must route `/ws/terminal/*` to the ingest service on port `8080` and forward the HTTP Upgrade header.
-
-This is the mode to use when only the web app is publicly reachable (for example, when you expose the server through a Cloudflare tunnel that points at the web container on port `3000`).
+Set `INGEST_WS_URL=wss://host:8443` (or `ws://host:8080` for unencrypted LAN setups). The browser connects to that URL instead of the page origin. Only useful when you want the browser to talk to ingest directly rather than through any proxy.
 
 #### Cloudflare Tunnel example
 
