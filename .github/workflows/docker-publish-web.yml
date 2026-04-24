@@ -139,7 +139,12 @@ jobs:
   merge-web:
     name: Merge web image manifests
     if: github.event_name != 'release' || startsWith(github.event.release.tag_name, 'web/')
-    runs-on: self-hosted
+    # Hosted runner: this job is the single point of failure for the
+    # final manifest tag, and a self-hosted outage here strands a release
+    # even when both arch builds succeeded. The job is tiny — a few
+    # seconds of `docker buildx imagetools create` — so the GH-minute
+    # cost is negligible compared to the reliability gain.
+    runs-on: ubuntu-latest
     needs: build-web
     permissions:
       contents: read
@@ -152,9 +157,6 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Clean digests directory
-        run: rm -rf /tmp/digests
 
       - name: Download digests
         uses: actions/download-artifact@v8
@@ -186,13 +188,3 @@ jobs:
           docker buildx imagetools create \
             $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
             $(printf '${{ env.IMAGE_PREFIX }}/web@sha256:%s ' *)
-
-      - name: Clean up runner disk
-        if: always()
-        run: |
-          set +e
-          find "$GITHUB_WORKSPACE" -mindepth 1 -delete 2>/dev/null || true
-          rm -rf /tmp/digests 2>/dev/null || true
-          docker buildx prune -f --filter "until=1h" 2>/dev/null || true
-          docker system prune -f --filter "until=1h" 2>/dev/null || true
-          exit 0
