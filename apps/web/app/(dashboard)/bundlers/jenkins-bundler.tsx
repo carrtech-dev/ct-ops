@@ -42,8 +42,8 @@ type PluginRow = ResolvedPlugin & {
 type Report = {
   core: {
     version: string
-    minimumJava: number
-    javaSource: 'updates.jenkins.io' | 'estimated'
+    minimumJava: number | null
+    javaSource: 'updates.jenkins.io' | 'unavailable'
     javaCompatible: boolean | null
     warUrl: string | null
   }
@@ -551,10 +551,16 @@ function ReportCard({
           </div>
           <div>
             <span className="text-muted-foreground">Minimum Java for WAR: </span>
-            <span className="font-mono">Java {report.core.minimumJava}+</span>{' '}
-            <span className="text-xs text-muted-foreground">
-              ({report.core.javaSource === 'updates.jenkins.io' ? 'from updates.jenkins.io' : 'estimated — upstream catalogue did not cover this version'})
-            </span>
+            {report.core.minimumJava != null ? (
+              <>
+                <span className="font-mono">Java {report.core.minimumJava}+</span>{' '}
+                <span className="text-xs text-muted-foreground">(from updates.jenkins.io)</span>
+              </>
+            ) : (
+              <span className="text-xs text-muted-foreground">
+                Could not determine — updates.jenkins.io has no catalogue for this WAR
+              </span>
+            )}
           </div>
           <div className="sm:col-span-2">
             <span className="text-muted-foreground">WAR download: </span>
@@ -568,7 +574,7 @@ function ReportCard({
           </div>
         </div>
 
-        {javaOk === false && (
+        {javaOk === false && report.core.minimumJava != null && (
           <Alert variant="destructive">
             <AlertTriangle className="size-4" />
             <AlertTitle>Java version is too old for this WAR</AlertTitle>
@@ -577,12 +583,31 @@ function ReportCard({
             </AlertDescription>
           </Alert>
         )}
-        {javaOk === true && (
+        {javaOk === true && report.core.minimumJava != null && (
           <Alert>
             <CheckCircle2 className="size-4" />
             <AlertTitle>Java version looks compatible</AlertTitle>
             <AlertDescription>
               Jenkins {report.core.version} needs Java {report.core.minimumJava}+; you specified a compatible version.
+            </AlertDescription>
+          </Alert>
+        )}
+        {report.core.javaSource === 'unavailable' && (
+          <Alert>
+            <AlertTriangle className="size-4" />
+            <AlertTitle>Java compatibility could not be checked</AlertTitle>
+            <AlertDescription>
+              updates.jenkins.io did not return a catalogue for Jenkins {report.core.version}, so
+              we can&apos;t confirm the minimum Java version. Check{' '}
+              <a
+                href="https://www.jenkins.io/doc/book/platform-information/support-policy-java/"
+                className="underline"
+                target="_blank"
+                rel="noreferrer"
+              >
+                jenkins.io&apos;s Java support policy
+              </a>{' '}
+              before deploying this WAR.
             </AlertDescription>
           </Alert>
         )}

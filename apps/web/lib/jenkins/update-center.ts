@@ -6,8 +6,6 @@
  * All network access goes through this module so the API route stays thin
  * and the URL allow-list lives in one place.
  */
-import { compareVersions } from '@/lib/version-compare'
-
 const JENKINS_UPDATE_BASE = 'https://updates.jenkins.io'
 const JENKINS_DOWNLOAD_BASE = 'https://get.jenkins.io'
 
@@ -99,19 +97,22 @@ export async function getLatestLtsVersion(): Promise<string> {
 /**
  * Fetches the update-center catalogue for a specific core version.
  *
- * Jenkins infrastructure (`update-center2`) generates `dynamic-{version}`
- * catalogues per published core release, and the catalogue's `core` object
- * describes that exact core (including `requiredJavaVersion`). We query
- * that endpoint first so the Java requirement comes from upstream, not a
- * stale local table. If the per-version endpoint isn't published (rare,
- * but possible for one-off weeklies), we fall back to the "current"
- * catalogue — which is fine for resolving plugin compatibility but its
- * `core` describes a different version, so we mark the result with
- * `coreVersionMatches: false` and the caller treats `coreRequiredJavaVersion`
- * as untrustworthy.
+ * Jenkins infrastructure (`update-center2`) publishes per-version catalogues
+ * under two prefixes: `dynamic-stable-{version}` for LTS releases (e.g.
+ * `2.555.1`) and `dynamic-{version}` for weekly releases (e.g. `2.543`).
+ * Both catalogues' `core` object describes that exact core including the
+ * authoritative `requiredJavaVersion` for that WAR. We try the LTS path
+ * first because that's what users select via the "Latest LTS" button, then
+ * fall through to the weekly path, and finally to the "current" catalogue.
+ * The "current" catalogue is fine for resolving plugin compatibility but its
+ * `core` describes the latest weekly — never the user's chosen WAR — so we
+ * mark the result with `coreVersionMatches: false` and the caller treats
+ * `coreRequiredJavaVersion` as untrustworthy (and surfaces "could not
+ * determine" rather than guessing).
  */
 export async function getUpdateCenterForCore(coreVersion: string): Promise<UpdateCenter> {
   const candidates = [
+    `${JENKINS_UPDATE_BASE}/dynamic-stable-${coreVersion}/update-center.actual.json`,
     `${JENKINS_UPDATE_BASE}/dynamic-${coreVersion}/update-center.actual.json`,
     `${JENKINS_UPDATE_BASE}/current/update-center.actual.json`,
   ]
@@ -155,31 +156,6 @@ export async function getUpdateCenterForCore(coreVersion: string): Promise<Updat
     coreRequiredJavaVersion: matches ? raw.core?.requiredJavaVersion : undefined,
     plugins,
   }
-}
-
-/**
- * Best-effort mapping of core WAR version → minimum Java version.
- *
- * The update-center catalogue carries `core.requiredJavaVersion` for the
- * catalogue's pinned core, but when the user selects a different WAR version
- * we need a standalone answer. This table tracks the publicly announced
- * Java baseline for each line.
- *
- * See: https://www.jenkins.io/doc/book/platform-information/support-policy-java/
- */
-const JAVA_BASELINES: Array<{ from: string; minJava: number }> = [
-  { from: '2.479', minJava: 17 },
-  { from: '2.463', minJava: 17 },
-  { from: '2.426', minJava: 11 },
-  { from: '2.357', minJava: 11 },
-  { from: '2.164', minJava: 8 },
-]
-
-export function minimumJavaForCore(coreVersion: string): number {
-  for (const row of JAVA_BASELINES) {
-    if (compareVersions(coreVersion, row.from) >= 0) return row.minJava
-  }
-  return 8
 }
 
 /** Built WAR download URL for a given core version. Tries the LTS path first. */
