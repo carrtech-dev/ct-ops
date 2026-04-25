@@ -5,6 +5,8 @@ RUN corepack enable && corepack prepare pnpm@10 --activate
 
 # --- Agent binary build stage ---
 # Cross-compiles every supported agent binary so the web image is self-contained.
+# PR image checks build this stage so installer releases cannot ship with
+# missing baked agent binaries.
 # The download route falls back to these baked binaries when the operator-managed
 # volume is empty and GitHub is unreachable (air-gap installs).
 FROM golang:1.25-alpine AS agent-builder
