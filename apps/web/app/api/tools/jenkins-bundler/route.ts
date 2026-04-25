@@ -4,7 +4,6 @@ import {
   type UpdateCenterPlugin,
   getLatestLtsVersion,
   getUpdateCenterForCore,
-  minimumJavaForCore,
   resolveWarUrl,
 } from '@/lib/jenkins/update-center'
 import { compareVersions } from '@/lib/version-compare'
@@ -27,12 +26,13 @@ export type ResolvedPlugin = {
 export type ResolveResponse = {
   ok: true
   coreVersion: string
-  coreMinimumJava: number
-  // Where the `coreMinimumJava` value came from. Surfaced to the UI so the
-  // user knows whether the answer is the upstream-authoritative one or a
-  // local best-guess (e.g. when updates.jenkins.io has no per-version
-  // catalogue for the requested WAR).
-  coreJavaSource: 'updates.jenkins.io' | 'estimated'
+  // Null when updates.jenkins.io did not publish a per-version catalogue for
+  // the requested WAR, in which case we have no authoritative answer and we
+  // refuse to guess. The UI surfaces this as "could not determine".
+  coreMinimumJava: number | null
+  coreJavaSource: 'updates.jenkins.io' | 'unavailable'
+  // Null when either the user didn't specify a Java version, or we couldn't
+  // determine the WAR's requirement.
   javaCompatible: boolean | null
   warUrl: string | null
   plugins: ResolvedPlugin[]
@@ -168,16 +168,17 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
       resolveWarUrl(coreVersion),
     ])
 
-    // Prefer the live answer from updates.jenkins.io's per-version catalogue,
-    // but only when its `core.version` matched the user's request. Otherwise
-    // (no per-version catalogue, or the action fell back to "current") we
-    // can't trust that field for this WAR, and we fall back to the local
-    // baseline table — flagged as `estimated` so the UI can say so.
+    // The only Java-requirement source we trust is updates.jenkins.io's
+    // per-version catalogue, and only when its `core.version` matches the
+    // user's WAR. If the catalogue isn't published for this version (or only
+    // the "current" weekly catalogue responded), we report `unavailable`
+    // rather than guessing.
     const liveJava = uc.coreVersionMatches ? extractJavaMajor(uc.coreRequiredJavaVersion) : null
-    const coreMinimumJava = liveJava ?? minimumJavaForCore(coreVersion)
+    const coreMinimumJava = liveJava
     const coreJavaSource: ResolveResponse['coreJavaSource'] =
-      liveJava != null ? 'updates.jenkins.io' : 'estimated'
-    const javaCompatible = javaVersion == null ? null : javaVersion >= coreMinimumJava
+      liveJava != null ? 'updates.jenkins.io' : 'unavailable'
+    const javaCompatible =
+      javaVersion == null || coreMinimumJava == null ? null : javaVersion >= coreMinimumJava
 
     const resolved = resolvePlugins(requested, coreVersion, uc.plugins, javaVersion ?? null)
 
