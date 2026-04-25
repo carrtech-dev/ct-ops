@@ -5,6 +5,7 @@ import JSZip from 'jszip'
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronRight,
   Download,
   FileCode2,
   HelpCircle,
@@ -21,6 +22,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -31,10 +33,21 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import type { JenkinsBundlerResponse, ResolvedPlugin, ResolveResponse } from '@/app/api/tools/jenkins-bundler/route'
+import type {
+  JenkinsBundlerResponse,
+  ResolvedPlugin,
+  ResolvedPluginNode,
+  ResolveResponse,
+} from '@/app/api/tools/jenkins-bundler/route'
 
 type PluginRow = ResolvedPlugin & {
   downloaded: boolean
+  downloadError?: string
+  downloadedBytes?: number
+}
+
+type PluginNodeRow = ResolvedPluginNode & {
+  downloaded?: boolean
   downloadError?: string
   downloadedBytes?: number
 }
@@ -47,7 +60,12 @@ type Report = {
     javaCompatible: boolean | null
     warUrl: string | null
   }
-  plugins: PluginRow[]
+  plugins: PluginNodeRow[]
+  transitivePlugins: PluginRow[]
+  // True iff the user resolved with the "include dependencies" toggle on. The
+  // tree UI is shown only when this is true; otherwise the original flat
+  // table renders unchanged.
+  includesTransitive: boolean
   generatedAt: string
 }
 
@@ -159,10 +177,12 @@ export function JenkinsBundler() {
   const [coreVersion, setCoreVersion] = useState('')
   const [javaVersion, setJavaVersion] = useState<string>('')
   const [pluginsText, setPluginsText] = useState('')
+  const [includeDeps, setIncludeDeps] = useState(false)
   const [loadingLts, setLoadingLts] = useState(false)
   const [resolving, setResolving] = useState(false)
   const [resolveError, setResolveError] = useState<string | null>(null)
   const [report, setReport] = useState<Report | null>(null)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [downloading, setDownloading] = useState(false)
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const [currentFile, setCurrentFile] = useState<string | null>(null)
@@ -171,10 +191,20 @@ export function JenkinsBundler() {
   const [doneCount, setDoneCount] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  function toggleExpanded(key: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
   const totalToDownload = useMemo(() => {
     if (!report) return 0
-    const compatibleCount = report.plugins.filter((p) => p.status === 'compatible').length
-    return compatibleCount + (report.core.warUrl ? 1 : 0)
+    const topCompat = report.plugins.filter((p) => p.status === 'compatible').length
+    const transitiveCompat = report.transitivePlugins.filter((p) => p.status === 'compatible').length
+    return topCompat + transitiveCompat + (report.core.warUrl ? 1 : 0)
   }, [report])
 
   const overallPct = useMemo(() => {
@@ -239,6 +269,7 @@ export function JenkinsBundler() {
         coreVersion: coreVersion.trim(),
         plugins: pluginList,
         javaVersion: javaNum,
+        includeTransitiveDeps: includeDeps,
       })
       if (!data.ok) {
         setResolveError(data.error)
@@ -253,9 +284,14 @@ export function JenkinsBundler() {
           javaCompatible: resolved.javaCompatible,
           warUrl: resolved.warUrl,
         },
-        plugins: resolved.plugins.map((p) => ({ ...p, downloaded: false })),
+        plugins: resolved.plugins,
+        transitivePlugins: resolved.transitivePlugins.map((p) => ({ ...p, downloaded: false })),
+        includesTransitive: includeDeps,
         generatedAt: new Date().toISOString(),
       })
+      // Pre-expand top-level plugins so the tree opens to its first level by
+      // default — saves a click and makes it obvious deps are there.
+      setExpanded(new Set(resolved.plugins.map((p) => `/${p.name}`)))
     } catch (e) {
       setResolveError(e instanceof Error ? e.message : 'Failed to resolve plugins')
     } finally {
@@ -274,7 +310,8 @@ export function JenkinsBundler() {
 
     const zip = new JSZip()
     const pluginsFolder = zip.folder('plugins')!
-    const updated: PluginRow[] = report.plugins.map((p) => ({ ...p }))
+    const updatedTop: PluginNodeRow[] = report.plugins.map((p) => ({ ...p }))
+    const updatedTransitive: PluginRow[] = report.transitivePlugins.map((p) => ({ ...p }))
 
     try {
       if (report.core.warUrl) {
@@ -290,28 +327,77 @@ export function JenkinsBundler() {
         setDoneCount((c) => c + 1)
       }
 
-      for (let i = 0; i < updated.length; i++) {
-        const plugin = updated[i]!
-        if (plugin.status !== 'compatible' || !plugin.version) continue
-        const filename = `${plugin.name}.hpi`
+      // Single combined download list. Top-level requested plugins first, then
+      // resolved transitive deps. Defensive dedup by lowercased name in case a
+      // requested plugin was also reachable transitively (the API contract
+      // already excludes that, but the cost of a Set guard is trivial).
+      const seen = new Set<string>()
+      const downloadList: Array<{
+        kind: 'top' | 'transitive'
+        index: number
+        name: string
+        version: string
+        size: number | null
+      }> = []
+
+      for (let i = 0; i < updatedTop.length; i++) {
+        const p = updatedTop[i]!
+        if (p.status !== 'compatible' || !p.version) continue
+        const key = p.name.toLowerCase()
+        if (seen.has(key)) continue
+        seen.add(key)
+        downloadList.push({ kind: 'top', index: i, name: p.name, version: p.version, size: p.size ?? null })
+      }
+      for (let i = 0; i < updatedTransitive.length; i++) {
+        const p = updatedTransitive[i]!
+        if (p.status !== 'compatible' || !p.version) continue
+        const key = p.name.toLowerCase()
+        if (seen.has(key)) continue
+        seen.add(key)
+        downloadList.push({ kind: 'transitive', index: i, name: p.name, version: p.version, size: p.size ?? null })
+      }
+
+      for (const item of downloadList) {
+        const filename = `${item.name}.hpi`
         setCurrentFile(`plugins/${filename}`)
         setCurrentLoaded(0)
-        setCurrentTotal(plugin.size ?? null)
+        setCurrentTotal(item.size)
         try {
           const bytes = await fetchWithProgress(
-            { kind: 'plugin', name: plugin.name, version: plugin.version },
+            { kind: 'plugin', name: item.name, version: item.version },
             (loaded, total) => {
               setCurrentLoaded(loaded)
-              setCurrentTotal(total ?? plugin.size ?? null)
+              setCurrentTotal(total ?? item.size)
             },
           )
           pluginsFolder.file(filename, bytes)
-          updated[i] = { ...plugin, downloaded: true, downloadedBytes: bytes.byteLength }
+          if (item.kind === 'top') {
+            updatedTop[item.index] = {
+              ...updatedTop[item.index]!,
+              downloaded: true,
+              downloadedBytes: bytes.byteLength,
+            }
+          } else {
+            updatedTransitive[item.index] = {
+              ...updatedTransitive[item.index]!,
+              downloaded: true,
+              downloadedBytes: bytes.byteLength,
+            }
+          }
         } catch (err) {
-          updated[i] = {
-            ...plugin,
-            downloaded: false,
-            downloadError: err instanceof Error ? err.message : 'Download failed',
+          const msg = err instanceof Error ? err.message : 'Download failed'
+          if (item.kind === 'top') {
+            updatedTop[item.index] = {
+              ...updatedTop[item.index]!,
+              downloaded: false,
+              downloadError: msg,
+            }
+          } else {
+            updatedTransitive[item.index] = {
+              ...updatedTransitive[item.index]!,
+              downloaded: false,
+              downloadError: msg,
+            }
           }
         }
         setDoneCount((c) => c + 1)
@@ -320,17 +406,32 @@ export function JenkinsBundler() {
       const manifest = {
         generatedAt: report.generatedAt,
         core: report.core,
-        plugins: updated.map((p) => ({
+        includesTransitive: report.includesTransitive,
+        plugins: updatedTop.map((p) => ({
           name: p.name,
           version: p.version ?? null,
           status: p.status,
           reason: p.reason ?? null,
           requiredCore: p.requiredCore ?? null,
           minimumJavaVersion: p.minimumJavaVersion ?? null,
-          downloaded: p.downloaded,
+          downloaded: p.downloaded ?? false,
           downloadError: p.downloadError ?? null,
           sha256: p.sha256 ?? null,
         })),
+        transitivePlugins: updatedTransitive.map((p) => ({
+          name: p.name,
+          version: p.version ?? null,
+          status: p.status,
+          reason: p.reason ?? null,
+          requiredCore: p.requiredCore ?? null,
+          minimumJavaVersion: p.minimumJavaVersion ?? null,
+          downloaded: p.downloaded ?? false,
+          downloadError: p.downloadError ?? null,
+          sha256: p.sha256 ?? null,
+        })),
+        // Self-documenting: the full tree (with `dependencies`, `origin`,
+        // cycle markers, etc.) so the bundle records *why* each .hpi is here.
+        dependencyTree: report.plugins,
       }
       zip.file('bundle-manifest.json', JSON.stringify(manifest, null, 2))
 
@@ -344,7 +445,7 @@ export function JenkinsBundler() {
       a.remove()
       URL.revokeObjectURL(url)
 
-      setReport({ ...report, plugins: updated })
+      setReport({ ...report, plugins: updatedTop, transitivePlugins: updatedTransitive })
     } catch (e) {
       setDownloadError(e instanceof Error ? e.message : 'Download failed')
     } finally {
@@ -353,8 +454,14 @@ export function JenkinsBundler() {
     }
   }
 
-  const compatibleCount = report?.plugins.filter((p) => p.status === 'compatible').length ?? 0
-  const incompatibleCount = (report?.plugins.length ?? 0) - compatibleCount
+  // Counts span both top-level requested plugins and (when the toggle was on)
+  // their resolved transitive deps — `incompatibleCount` reflects everything
+  // the user might want to look at, not just the listed names.
+  const topCompatible = report?.plugins.filter((p) => p.status === 'compatible').length ?? 0
+  const topIncompatible = (report?.plugins.length ?? 0) - topCompatible
+  const transitiveCompatible = report?.transitivePlugins.filter((p) => p.status === 'compatible').length ?? 0
+  const compatibleCount = topCompatible + transitiveCompatible
+  const incompatibleCount = topIncompatible
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_420px]">
@@ -449,6 +556,24 @@ export function JenkinsBundler() {
               </Alert>
             )}
 
+            <div className="flex items-center gap-3 rounded-md border bg-muted/30 px-3 py-2">
+              <Switch
+                id="include-deps"
+                checked={includeDeps}
+                onCheckedChange={setIncludeDeps}
+                disabled={resolving || downloading}
+              />
+              <div className="space-y-0.5">
+                <Label htmlFor="include-deps" className="cursor-pointer">
+                  Pull in plugin dependencies recursively
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Walks each listed plugin&apos;s required dependencies, includes them in the bundle, and shows
+                  the full tree below. Optional dependencies are surfaced but not pulled in.
+                </p>
+              </div>
+            </div>
+
             <div className="flex flex-wrap gap-2">
               <Button type="button" onClick={resolve} disabled={resolving || downloading}>
                 {resolving ? <Loader2 className="mr-1.5 size-4 animate-spin" /> : <RefreshCw className="mr-1.5 size-4" />}
@@ -518,7 +643,16 @@ export function JenkinsBundler() {
           </Alert>
         )}
 
-        {report && <ReportCard report={report} compatibleCount={compatibleCount} incompatibleCount={incompatibleCount} />}
+        {report && (
+          <ReportCard
+            report={report}
+            compatibleCount={compatibleCount}
+            incompatibleCount={incompatibleCount}
+            transitiveCount={transitiveCompatible}
+            expanded={expanded}
+            toggleExpanded={toggleExpanded}
+          />
+        )}
       </div>
 
       <div className="space-y-6">
@@ -532,10 +666,16 @@ function ReportCard({
   report,
   compatibleCount,
   incompatibleCount,
+  transitiveCount,
+  expanded,
+  toggleExpanded,
 }: {
   report: Report
   compatibleCount: number
   incompatibleCount: number
+  transitiveCount: number
+  expanded: Set<string>
+  toggleExpanded: (key: string) => void
 }) {
   const javaOk = report.core.javaCompatible
   return (
@@ -616,6 +756,11 @@ function ReportCard({
           <div className="flex flex-wrap gap-2 text-xs">
             <Badge className="bg-emerald-600 hover:bg-emerald-600">{compatibleCount} compatible</Badge>
             {incompatibleCount > 0 && <Badge variant="destructive">{incompatibleCount} incompatible / missing</Badge>}
+            {report.includesTransitive && (
+              <Badge variant="secondary">
+                {transitiveCount} transitive {transitiveCount === 1 ? 'dependency' : 'dependencies'}
+              </Badge>
+            )}
           </div>
         )}
 
@@ -625,54 +770,234 @@ function ReportCard({
           </p>
         )}
 
-        {report.plugins.length > 0 && (
-        <div className="overflow-x-auto rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Plugin</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Version</TableHead>
-                <TableHead>Needs core</TableHead>
-                <TableHead>Min Java</TableHead>
-                <TableHead className="text-right">Size</TableHead>
-                <TableHead>Download</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {report.plugins.map((p) => (
-                <TableRow key={p.name}>
-                  <TableCell className="font-mono text-xs">{p.name}</TableCell>
-                  <TableCell>{statusBadge(p.status)}</TableCell>
-                  <TableCell className="font-mono text-xs">{p.version ?? '—'}</TableCell>
-                  <TableCell className="font-mono text-xs">{p.requiredCore ?? '—'}</TableCell>
-                  <TableCell className="font-mono text-xs">{p.minimumJavaVersion ?? '—'}</TableCell>
-                  <TableCell className="text-right font-mono text-xs">{formatBytes(p.size)}</TableCell>
-                  <TableCell>
-                    {p.downloaded ? (
-                      <span className="flex items-center gap-1 text-xs text-emerald-600">
-                        <CheckCircle2 className="size-3.5" /> Ok
-                      </span>
-                    ) : p.downloadError ? (
-                      <span className="flex items-center gap-1 text-xs text-destructive" title={p.downloadError}>
-                        <XCircle className="size-3.5" /> Failed
-                      </span>
-                    ) : p.reason ? (
-                      <span className="text-xs text-muted-foreground" title={p.reason}>
-                        Skipped
-                      </span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">Pending</span>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+        {report.plugins.length > 0 && !report.includesTransitive && (
+          <FlatPluginsTable plugins={report.plugins} />
+        )}
+
+        {report.plugins.length > 0 && report.includesTransitive && (
+          <div className="space-y-2">
+            <div className="text-sm font-medium">Requested plugins</div>
+            <div className="overflow-x-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Plugin</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Version</TableHead>
+                    <TableHead>Needs core</TableHead>
+                    <TableHead>Min Java</TableHead>
+                    <TableHead className="text-right">Size</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {report.plugins.map((node) => (
+                    <PluginTreeRow
+                      key={node.name}
+                      node={node}
+                      depth={0}
+                      parentPath=""
+                      expanded={expanded}
+                      toggle={toggleExpanded}
+                    />
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Click a row with a chevron to expand its dependencies. Optional dependencies are shown for context but
+              not pulled into the bundle.
+            </p>
+          </div>
+        )}
+
+        {report.transitivePlugins.length > 0 && (
+          <div className="space-y-2">
+            <div className="text-sm font-medium">
+              All dependencies that will be added ({report.transitivePlugins.length})
+            </div>
+            <div className="overflow-x-auto rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Plugin</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Version</TableHead>
+                    <TableHead>Needs core</TableHead>
+                    <TableHead>Min Java</TableHead>
+                    <TableHead className="text-right">Size</TableHead>
+                    <TableHead>Download</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {report.transitivePlugins.map((p) => (
+                    <TableRow key={p.name}>
+                      <TableCell className="font-mono text-xs">{p.name}</TableCell>
+                      <TableCell>{statusBadge(p.status)}</TableCell>
+                      <TableCell className="font-mono text-xs">{p.version ?? '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">{p.requiredCore ?? '—'}</TableCell>
+                      <TableCell className="font-mono text-xs">{p.minimumJavaVersion ?? '—'}</TableCell>
+                      <TableCell className="text-right font-mono text-xs">{formatBytes(p.size)}</TableCell>
+                      <TableCell>{downloadStateCell(p)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </div>
         )}
       </CardContent>
     </Card>
+  )
+}
+
+/**
+ * Original flat table — preserved verbatim for the toggle-off path so existing
+ * users see zero change.
+ */
+function FlatPluginsTable({ plugins }: { plugins: PluginNodeRow[] }) {
+  return (
+    <div className="overflow-x-auto rounded-md border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Plugin</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Version</TableHead>
+            <TableHead>Needs core</TableHead>
+            <TableHead>Min Java</TableHead>
+            <TableHead className="text-right">Size</TableHead>
+            <TableHead>Download</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {plugins.map((p) => (
+            <TableRow key={p.name}>
+              <TableCell className="font-mono text-xs">{p.name}</TableCell>
+              <TableCell>{statusBadge(p.status)}</TableCell>
+              <TableCell className="font-mono text-xs">{p.version ?? '—'}</TableCell>
+              <TableCell className="font-mono text-xs">{p.requiredCore ?? '—'}</TableCell>
+              <TableCell className="font-mono text-xs">{p.minimumJavaVersion ?? '—'}</TableCell>
+              <TableCell className="text-right font-mono text-xs">{formatBytes(p.size)}</TableCell>
+              <TableCell>{downloadStateCell(p)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  )
+}
+
+function downloadStateCell(p: { downloaded?: boolean; downloadError?: string; reason?: string }) {
+  if (p.downloaded) {
+    return (
+      <span className="flex items-center gap-1 text-xs text-emerald-600">
+        <CheckCircle2 className="size-3.5" /> Ok
+      </span>
+    )
+  }
+  if (p.downloadError) {
+    return (
+      <span className="flex items-center gap-1 text-xs text-destructive" title={p.downloadError}>
+        <XCircle className="size-3.5" /> Failed
+      </span>
+    )
+  }
+  if (p.reason) {
+    return (
+      <span className="text-xs text-muted-foreground" title={p.reason}>
+        Skipped
+      </span>
+    )
+  }
+  return <span className="text-xs text-muted-foreground">Pending</span>
+}
+
+/**
+ * Recursively renders one plugin row plus, when expanded, its dependency rows.
+ *
+ * Expansion is keyed by the full path from the root (`/git/scm-api/...`) so the
+ * same plugin name appearing under two different parents toggles independently.
+ * A node is expandable iff it has a populated `dependencies` array — optional
+ * deps and cycle/already-listed leaves render without a chevron.
+ */
+function PluginTreeRow({
+  node,
+  depth,
+  parentPath,
+  expanded,
+  toggle,
+}: {
+  node: ResolvedPluginNode
+  depth: number
+  parentPath: string
+  expanded: Set<string>
+  toggle: (key: string) => void
+}) {
+  const path = `${parentPath}/${node.name}`
+  const hasChildren = !!node.dependencies && node.dependencies.length > 0
+  const isOpen = hasChildren && expanded.has(path)
+
+  return (
+    <>
+      <TableRow>
+        <TableCell className="font-mono text-xs">
+          <div className="flex items-center gap-1" style={{ paddingLeft: depth * 16 }}>
+            {hasChildren ? (
+              <button
+                type="button"
+                onClick={() => toggle(path)}
+                className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label={isOpen ? 'Collapse' : 'Expand'}
+                aria-expanded={isOpen}
+              >
+                <ChevronRight
+                  className={`size-3.5 transition-transform ${isOpen ? 'rotate-90' : ''}`}
+                />
+              </button>
+            ) : (
+              <span className="inline-block w-[18px]" />
+            )}
+            <span>{node.name}</span>
+            {node.origin === 'optional-dep' && (
+              <Badge variant="outline" className="ml-1 text-[10px] font-normal text-muted-foreground">
+                Optional
+              </Badge>
+            )}
+            {node.cycle && (
+              <Badge variant="outline" className="ml-1 text-[10px] font-normal text-muted-foreground">
+                Cycle
+              </Badge>
+            )}
+            {node.alreadyListed && (
+              <Badge variant="outline" className="ml-1 text-[10px] font-normal text-muted-foreground">
+                Already listed
+              </Badge>
+            )}
+            {node.requiredByVersion && depth > 0 && (
+              <span className="ml-1 text-[10px] text-muted-foreground">
+                (parent wants v{node.requiredByVersion})
+              </span>
+            )}
+          </div>
+        </TableCell>
+        <TableCell>{statusBadge(node.status)}</TableCell>
+        <TableCell className="font-mono text-xs">{node.version ?? '—'}</TableCell>
+        <TableCell className="font-mono text-xs">{node.requiredCore ?? '—'}</TableCell>
+        <TableCell className="font-mono text-xs">{node.minimumJavaVersion ?? '—'}</TableCell>
+        <TableCell className="text-right font-mono text-xs">{formatBytes(node.size)}</TableCell>
+      </TableRow>
+      {isOpen
+        && node.dependencies?.map((child) => (
+          <PluginTreeRow
+            key={`${path}/${child.name}`}
+            node={child}
+            depth={depth + 1}
+            parentPath={path}
+            expanded={expanded}
+            toggle={toggle}
+          />
+        ))}
+    </>
   )
 }
 
