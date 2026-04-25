@@ -126,8 +126,19 @@ func main() {
 		})
 		mux.Handle("/ws/terminal/", terminalWSHandler)
 		addr := fmt.Sprintf(":%d", cfg.HTTPPort)
+		// Explicit Server so we can set ReadHeaderTimeout — without it a slow
+		// client can hold a connection open indefinitely while dribbling
+		// header bytes (gosec G114, "Slowloris"). Read/Write/IdleTimeout are
+		// intentionally left at zero: the same mux serves the
+		// /ws/terminal/ WebSocket upgrade, whose post-upgrade connections
+		// must stay open for the lifetime of the terminal session.
+		srv := &http.Server{
+			Addr:              addr,
+			Handler:           mux,
+			ReadHeaderTimeout: 10 * time.Second,
+		}
 		slog.Info("JWKS HTTP server starting", "addr", addr)
-		if err := http.ListenAndServe(addr, mux); err != nil && err != http.ErrServerClosed {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("JWKS server error", "err", err)
 		}
 	}()
