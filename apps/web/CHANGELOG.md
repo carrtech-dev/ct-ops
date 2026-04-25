@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.65.2](https://github.com/carrtech-dev/ct-ops/compare/web/v0.65.1...web/v0.65.2) (2026-04-25)
+
+
+### Bug Fixes
+
+* **web:** Jenkins bundler — query LTS catalogue, drop hard-coded Java baselines ([7e0b91e](https://github.com/carrtech-dev/ct-ops/commit/7e0b91e3bc86f629d4ff1a139824cf30da7a43b4))
+* **web:** Jenkins bundler — query LTS catalogue, drop hard-coded Java baselines ([f166274](https://github.com/carrtech-dev/ct-ops/commit/f166274b7b6743a048253a7fcfd2845cae8d70ce))
+
 ## [0.65.1](https://github.com/carrtech-dev/ct-ops/compare/web/v0.65.0...web/v0.65.1) (2026-04-24)
 
 
