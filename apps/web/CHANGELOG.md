@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.70.4](https://github.com/carrtech-dev/ct-ops/compare/web/v0.70.3...web/v0.70.4) (2026-04-26)
+
+
+### Bug Fixes
+
+* **auth:** require email verification for local sign-ups ([#564](https://github.com/carrtech-dev/ct-ops/issues/564)) ([e10d30a](https://github.com/carrtech-dev/ct-ops/commit/e10d30a6708667a7b3107da09bd6ffe91a859e1f))
+
 ## [0.70.3](https://github.com/carrtech-dev/ct-ops/compare/web/v0.70.2...web/v0.70.3) (2026-04-26)
 
 
