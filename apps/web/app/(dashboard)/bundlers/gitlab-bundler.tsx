@@ -9,6 +9,7 @@ import {
   Download,
   Loader2,
   Package,
+  RefreshCw,
   Search,
 } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -32,7 +33,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import type { GitLabBundleStep, GitLabBundlerResponse } from '@/app/api/tools/gitlab-bundler/route'
+import type { GitLabBundleStep, GitLabBundlerResponse, GitLabLatestVersionResponse } from '@/app/api/tools/gitlab-bundler/route'
 
 const OS_OPTIONS = [
   { value: 'ubuntu-noble', label: 'Ubuntu 24.04 Noble', kind: 'deb', arches: ['amd64', 'arm64'] },
@@ -117,6 +118,7 @@ export function GitLabBundler() {
   const selectedOs = OS_OPTIONS.find((option) => option.value === packageTarget) ?? OS_OPTIONS[1]!
   const [arch, setArch] = useState<string>(selectedOs.arches[0])
   const [resolving, setResolving] = useState(false)
+  const [fetchingLatest, setFetchingLatest] = useState(false)
   const [resolveError, setResolveError] = useState<string | null>(null)
   const [report, setReport] = useState<Report | null>(null)
   const [downloading, setDownloading] = useState(false)
@@ -177,6 +179,30 @@ export function GitLabBundler() {
       setResolveError(err instanceof Error ? err.message : 'Failed to resolve GitLab upgrade path')
     } finally {
       setResolving(false)
+    }
+  }
+
+  async function fetchLatestTargetVersion() {
+    setResolveError(null)
+    setDownloadError(null)
+    setFetchingLatest(true)
+    try {
+      const data = await postJson<GitLabLatestVersionResponse>({
+        action: 'latest',
+        edition,
+        packageTarget,
+        arch,
+      })
+      if (!data.ok) {
+        setResolveError(data.error)
+        return
+      }
+      setTargetVersion(data.version)
+      setReport(null)
+    } catch (err) {
+      setResolveError(err instanceof Error ? err.message : 'Failed to fetch latest GitLab version')
+    } finally {
+      setFetchingLatest(false)
     }
   }
 
@@ -282,20 +308,31 @@ export function GitLabBundler() {
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="gitlab-target">Target GitLab version</Label>
-                <Input
-                  id="gitlab-target"
-                  placeholder="e.g. 18.6.6"
-                  value={targetVersion}
-                  onChange={(event) => setTargetVersion(event.target.value)}
-                  disabled={resolving || downloading}
-                />
+                <div className="flex gap-2">
+                  <Input
+                    id="gitlab-target"
+                    placeholder="e.g. 18.6.6"
+                    value={targetVersion}
+                    onChange={(event) => setTargetVersion(event.target.value)}
+                    disabled={resolving || downloading || fetchingLatest}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={fetchLatestTargetVersion}
+                    disabled={resolving || downloading || fetchingLatest}
+                  >
+                    {fetchingLatest ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+                    Use latest
+                  </Button>
+                </div>
               </div>
             </div>
 
             <div className="grid gap-4 md:grid-cols-3">
               <div className="space-y-1.5">
                 <Label>Edition</Label>
-                <Select value={edition} onValueChange={(value) => setEdition(value as 'ee' | 'ce')} disabled={resolving || downloading}>
+                <Select value={edition} onValueChange={(value) => setEdition(value as 'ee' | 'ce')} disabled={resolving || downloading || fetchingLatest}>
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -307,7 +344,7 @@ export function GitLabBundler() {
               </div>
               <div className="space-y-1.5">
                 <Label>OS package target</Label>
-                <Select value={packageTarget} onValueChange={onOsChange} disabled={resolving || downloading}>
+                <Select value={packageTarget} onValueChange={onOsChange} disabled={resolving || downloading || fetchingLatest}>
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -322,7 +359,7 @@ export function GitLabBundler() {
               </div>
               <div className="space-y-1.5">
                 <Label>Architecture</Label>
-                <Select value={arch} onValueChange={setArch} disabled={resolving || downloading}>
+                <Select value={arch} onValueChange={setArch} disabled={resolving || downloading || fetchingLatest}>
                   <SelectTrigger className="w-full">
                     <SelectValue />
                   </SelectTrigger>
@@ -338,7 +375,7 @@ export function GitLabBundler() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <Button onClick={resolve} disabled={resolving || downloading}>
+              <Button onClick={resolve} disabled={resolving || downloading || fetchingLatest}>
                 {resolving ? <Loader2 className="size-4 animate-spin" /> : <Search className="size-4" />}
                 Find upgrade packages
               </Button>
