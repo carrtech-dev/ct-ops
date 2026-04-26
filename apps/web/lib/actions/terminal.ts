@@ -4,13 +4,14 @@ import { db } from '@/lib/db'
 import { organisations, hosts, terminalSessions } from '@/lib/db/schema'
 import { eq, and, isNull } from 'drizzle-orm'
 import { createId } from '@paralleldrive/cuid2'
+import { createHash, randomBytes } from 'node:crypto'
 import { getRequiredSession } from '@/lib/auth/session'
 import type { OrgMetadata, HostMetadata } from '@/lib/db/schema'
 import { ADMIN_ROLES } from '@/lib/auth/roles'
 
 export interface TerminalAccessResult {
   allowed: true
-  directAccess: boolean
+  directAccess: false
 }
 
 export interface TerminalAccessDenied {
@@ -63,10 +64,9 @@ export async function checkTerminalAccess(
     return { allowed: false, reason: 'You are not authorised to access this host terminal' }
   }
 
-  // directAccess (shell runs as agent user/root) is restricted to admins only.
-  // Non-admin engineers can open a terminal but must supply a username (H-21).
-  const isAdmin = ADMIN_ROLES.includes(user.role)
-  return { allowed: true, directAccess: isAdmin && orgMeta.terminalDirectAccess === true }
+  // Terminal access is always SSH-backed. CTOps never opens a shell through
+  // the agent or as the agent/root user.
+  return { allowed: true, directAccess: false }
 }
 
 // POSIX-compliant: starts with letter or underscore, contains only [a-zA-Z0-9_-], max 32 chars
@@ -81,37 +81,39 @@ export async function createTerminalSession(
   orgId: string,
   hostId: string,
   username?: string,
-): Promise<{ sessionId: string; ingestWsUrl: string } | { error: string }> {
+): Promise<{ sessionId: string; ingestWsUrl: string; websocketToken: string } | { error: string }> {
   const access = await checkTerminalAccess(orgId, hostId)
   if (!access.allowed) {
     return { error: access.reason }
   }
 
-  // Validate username when not in direct access mode
   const trimmedUsername = username?.trim()
-  if (!access.directAccess) {
-    if (!trimmedUsername) {
-      return { error: 'Username is required for terminal access' }
-    }
-    if (trimmedUsername.length > 256) {
-      return { error: 'Username is too long' }
-    }
-    if (!VALID_USERNAME_RE.test(trimmedUsername)) {
-      return { error: 'Username contains invalid characters' }
-    }
+  if (!trimmedUsername) {
+    return { error: 'Username is required for SSH terminal access' }
+  }
+  if (trimmedUsername.length > 256) {
+    return { error: 'Username is too long' }
+  }
+  if (!VALID_USERNAME_RE.test(trimmedUsername)) {
+    return { error: 'Username contains invalid characters' }
   }
 
   const session = await getRequiredSession()
 
   try {
     const sessionId = createId()
+    const websocketToken = randomBytes(32).toString('base64url')
+    const websocketTokenHash = createHash('sha256').update(websocketToken).digest('hex')
+    const expiresAt = new Date(Date.now() + 5 * 60 * 1000)
 
     await db.insert(terminalSessions).values({
       organisationId: orgId,
       hostId,
       userId: session.user.id,
       sessionId,
-      username: access.directAccess ? null : (trimmedUsername ?? null),
+      username: trimmedUsername,
+      websocketTokenHash,
+      expiresAt,
       status: 'pending',
     })
 
@@ -134,6 +136,7 @@ export async function createTerminalSession(
     return {
       sessionId,
       ingestWsUrl,
+      websocketToken,
     }
   } catch (err) {
     console.error('Failed to create terminal session:', err)
@@ -160,7 +163,7 @@ export async function getOrgTerminalSettings(
   return {
     terminalEnabled: meta.terminalEnabled !== false,
     terminalLoggingEnabled: meta.terminalLoggingEnabled === true,
-    terminalDirectAccess: meta.terminalDirectAccess === true,
+    terminalDirectAccess: false,
   }
 }
 
@@ -185,7 +188,7 @@ export async function updateOrgTerminalSettings(
       ...currentMetadata,
       terminalEnabled: settings.terminalEnabled,
       terminalLoggingEnabled: settings.terminalLoggingEnabled,
-      terminalDirectAccess: settings.terminalDirectAccess,
+      terminalDirectAccess: false,
     }
 
     await db

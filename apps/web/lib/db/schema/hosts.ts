@@ -50,6 +50,7 @@ export interface HostMetadata {
   collectionSettings?: HostCollectionSettings
   terminalEnabled?: boolean
   terminalAllowedUsers?: string[]
+  sshHostKeySha256?: string
   lastSoftwareScanAt?: string    // ISO timestamp; avoid Date in JSONB (use .toISOString())
   // Tags supplied via the agent CLI --tag flag / token metadata at register
   // time. Stashed here until approveAgent merges them with org defaults and
