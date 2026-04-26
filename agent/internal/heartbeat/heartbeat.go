@@ -233,9 +233,10 @@ func (r *Runner) runStream(ctx context.Context) error {
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
 
-	// Collect metrics and send first heartbeat immediately.
+	// Collect metrics and send first heartbeat immediately. The first message
+	// authenticates the stream, so agent_id carries the JWT for that one send.
 	r.refreshMetrics()
-	if err := r.sendHeartbeat(stream); err != nil {
+	if err := r.sendHeartbeatWithAgentID(stream, r.jwtToken); err != nil {
 		return err
 	}
 
@@ -575,9 +576,13 @@ func (r *Runner) refreshMetrics() {
 }
 
 func (r *Runner) sendHeartbeat(stream agentv1.IngestService_HeartbeatClient) error {
+	return r.sendHeartbeatWithAgentID(stream, r.agentID)
+}
+
+func (r *Runner) sendHeartbeatWithAgentID(stream agentv1.IngestService_HeartbeatClient, agentIDField string) error {
 	m := r.cachedMetrics
 	req := &agentv1.HeartbeatRequest{
-		AgentId:                     r.agentID,
+		AgentId:                     agentIDField,
 		CpuPercent:                  m.cpu,
 		MemoryPercent:               m.memory,
 		DiskPercent:                 m.disk,
