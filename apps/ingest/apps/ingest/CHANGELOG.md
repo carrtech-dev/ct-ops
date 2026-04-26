@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.3](https://github.com/carrtech-dev/ct-ops/compare/ingest/v0.1.2...ingest/v0.1.3) (2026-04-26)
+
+
+### Bug Fixes
+
+* **security:** reject invalid heartbeat jwt fallback ([660985b](https://github.com/carrtech-dev/ct-ops/commit/660985b2abc8a03b8862df33ab5ad2cb7ab1ecd9))
+* **security:** reject invalid heartbeat jwt fallback ([64d0f13](https://github.com/carrtech-dev/ct-ops/commit/64d0f13f8104803d37ad2eab753a908df0d64a9d))
+
 ## [0.1.2](https://github.com/carrtech-dev/ct-ops/compare/ingest/v0.1.1...ingest/v0.1.2) (2026-04-26)
 
 
