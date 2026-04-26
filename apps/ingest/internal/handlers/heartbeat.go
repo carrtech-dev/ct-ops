@@ -67,13 +67,7 @@ func (h *HeartbeatHandler) Heartbeat(stream agentv1.IngestService_HeartbeatServe
 	// Validate JWT
 	agentID, _, err := h.issuer.ValidateAgentToken(first.AgentId)
 	if err != nil {
-		// AgentId field carries the JWT token for authentication on first message
-		// If that fails, try treating it as an agent ID (backwards compat)
-		agentID = first.AgentId
-		if agentID == "" {
-			return status.Error(codes.Unauthenticated, "invalid or missing JWT")
-		}
-		slog.Debug("JWT validation failed, using agent_id directly", "agent_id", agentID, "err", err)
+		return status.Error(codes.Unauthenticated, "invalid or missing JWT")
 	}
 
 	// Verify agent is active
