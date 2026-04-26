@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.68.1](https://github.com/carrtech-dev/ct-ops/compare/web/v0.68.0...web/v0.68.1) (2026-04-26)
+
+
+### Bug Fixes
+
+* **auth:** scope LDAP login links to organisation ([96d28df](https://github.com/carrtech-dev/ct-ops/commit/96d28df206a7548ef5b1e07e6237585bf8f15cb8)), closes [#273](https://github.com/carrtech-dev/ct-ops/issues/273)
+
 ## [0.68.0](https://github.com/carrtech-dev/ct-ops/compare/web/v0.67.2...web/v0.68.0) (2026-04-26)
 
 
