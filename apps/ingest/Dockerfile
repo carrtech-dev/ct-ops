@@ -14,7 +14,7 @@ RUN go work sync && go mod download
 # Build
 RUN go build -o /dist/ingest ./apps/ingest/cmd/ingest
 
-FROM alpine:3.23
+FROM alpine:3.24
 
 RUN apk add --no-cache ca-certificates wget && \
     addgroup --system --gid 1001 ingest && \
