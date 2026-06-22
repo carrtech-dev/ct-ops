@@ -83,7 +83,7 @@ jobs:
             chown -R $(id -u):$(id -g) /ws 2>/dev/null || true
 
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -166,7 +166,7 @@ jobs:
           docker run --rm -v "$GITHUB_WORKSPACE:/ws" alpine \
             chown -R $(id -u):$(id -g) /ws 2>/dev/null || true
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ needs.release-please.outputs.bundle_tag_name }}
 

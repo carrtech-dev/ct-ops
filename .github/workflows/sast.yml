@@ -31,7 +31,7 @@ jobs:
             chown -R $(id -u):$(id -g) /ws 2>/dev/null || true
 
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -77,7 +77,7 @@ jobs:
       image: semgrep/semgrep
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Run semgrep
         continue-on-error: true
@@ -136,7 +136,7 @@ jobs:
             chown -R $(id -u):$(id -g) /ws 2>/dev/null || true
 
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Run trivy filesystem scan
         uses: aquasecurity/trivy-action@master
@@ -179,7 +179,7 @@ jobs:
           docker run --rm -v "$GITHUB_WORKSPACE:/ws" alpine \
             chown -R $(id -u):$(id -g) /ws 2>/dev/null || true
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Deny weak hash algorithms (TS/JS)
         run: |
@@ -238,7 +238,7 @@ jobs:
             chown -R $(id -u):$(id -g) /ws 2>/dev/null || true
 
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Run trivy config scan
         uses: aquasecurity/trivy-action@master
